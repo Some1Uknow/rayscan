@@ -8,7 +8,7 @@ function formatMaybe(value: string | number | null): string {
 }
 
 function formatLamports(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "0 SOL";
+  if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
   return `${(value / 1_000_000_000).toLocaleString("en-US", { maximumFractionDigits: 9 })} SOL`;
 }
 
@@ -28,11 +28,7 @@ function formatAddressType(value: "token_mint" | "token_account" | "program" | "
 }
 
 function formatUsd(value: number | null, decimals = 2): string {
-  if (value === null || Number.isNaN(value)) return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: decimals
-  }).format(0);
+  if (value === null || Number.isNaN(value)) return "N/A";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -41,7 +37,7 @@ function formatUsd(value: number | null, decimals = 2): string {
 }
 
 function formatPct(value: number | null): string {
-  if (value === null || Number.isNaN(value)) return "0.00%";
+  if (value === null || Number.isNaN(value)) return "N/A";
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(2)}%`;
 }
@@ -110,9 +106,9 @@ export default async function AddressPage({
     : mintLogoRawFallback(address);
 
   if (isTokenMint) {
-    const supplyUi = tokenDetails?.supply.amountUi ?? resolvedRuntime?.tokenMint?.supplyUi ?? 0;
-    const supplyRaw = tokenDetails?.supply.amountRaw ?? resolvedRuntime?.tokenMint?.supplyRaw ?? "0";
-    const supplyDecimals = tokenDetails?.supply.decimals ?? resolvedRuntime?.tokenMint?.decimals ?? 0;
+    const supplyUi = tokenDetails?.supply.amountUi ?? resolvedRuntime?.tokenMint?.supplyUi ?? null;
+    const supplyRaw = tokenDetails?.supply.amountRaw ?? resolvedRuntime?.tokenMint?.supplyRaw ?? null;
+    const supplyDecimals = tokenDetails?.supply.decimals ?? resolvedRuntime?.tokenMint?.decimals ?? null;
     const topHolders = tokenDetails?.holders ?? [];
     const recentTransfers = tokenDetails?.recentTransfers ?? [];
     const largestHolderPct = topHolders[0]?.pctOfSupply ?? null;
@@ -177,13 +173,13 @@ export default async function AddressPage({
           <article className="panel stat-card">
             <p className="stat-label">Supply (UI)</p>
             <p className="stat-value">
-              {supplyUi.toLocaleString("en-US")}
+              {supplyUi !== null ? supplyUi.toLocaleString("en-US") : "N/A"}
             </p>
-            <p className="stat-detail">Decimals {supplyDecimals}</p>
+            <p className="stat-detail">Decimals {supplyDecimals ?? "N/A"}</p>
           </article>
           <article className="panel stat-card">
             <p className="stat-label">Largest Holder Share</p>
-            <p className="stat-value">{largestHolderPct !== null ? `${largestHolderPct.toFixed(2)}%` : "0.00%"}</p>
+            <p className="stat-value">{largestHolderPct !== null ? `${largestHolderPct.toFixed(2)}%` : "N/A"}</p>
             <p className="stat-detail">{topHolders.length} tracked holder accounts</p>
           </article>
         </section>
@@ -206,11 +202,11 @@ export default async function AddressPage({
               </div>
               <div>
                 <dt>Decimals</dt>
-                <dd>{supplyDecimals}</dd>
+                <dd>{supplyDecimals ?? "N/A"}</dd>
               </div>
               <div>
                 <dt>Supply (Raw)</dt>
-                <dd>{supplyRaw}</dd>
+                <dd>{supplyRaw ?? "N/A"}</dd>
               </div>
             </dl>
           </article>
@@ -465,11 +461,11 @@ export default async function AddressPage({
             </div>
             <div>
               <dt>Amount (UI)</dt>
-              <dd>{runtime.tokenAccount.amountUi !== null ? runtime.tokenAccount.amountUi.toLocaleString("en-US") : "0"}</dd>
+              <dd>{runtime.tokenAccount.amountUi !== null ? runtime.tokenAccount.amountUi.toLocaleString("en-US") : "N/A"}</dd>
             </div>
             <div>
               <dt>Amount (Raw)</dt>
-              <dd>{runtime.tokenAccount.amountRaw ?? "0"}</dd>
+              <dd>{runtime.tokenAccount.amountRaw ?? "N/A"}</dd>
             </div>
           </dl>
         </section>

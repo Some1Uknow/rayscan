@@ -6,8 +6,19 @@ import { env } from "./env.js";
 
 const app = Fastify({ logger: true });
 
+const ALLOWED_CORS_ORIGINS = new Set(
+  env.API_CORS_ORIGINS
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+);
+
 await app.register(cors, {
-  origin: true
+  origin: (origin, callback) => {
+    // Allow non-browser clients and same-origin requests.
+    if (!origin) return callback(null, true);
+    callback(null, ALLOWED_CORS_ORIGINS.has(origin));
+  }
 });
 
 app.setErrorHandler((error, request, reply) => {
@@ -29,6 +40,60 @@ app.setErrorHandler((error, request, reply) => {
 
 app.get("/health", async () => {
   return { ok: true };
+});
+
+type RateLimitEntry = {
+  windowStartedAt: number;
+  count: number;
+};
+
+const rateLimitMap = new Map<string, RateLimitEntry>();
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const EXPENSIVE_PATH_PREFIXES = ["/v1/tokens/", "/v1/transactions/live", "/v1/network/overview", "/v1/network/trends"];
+
+function normalizeRatePath(url: string): string {
+  const path = url.split("?")[0] ?? "/";
+  if (path.startsWith("/v1/tokens/")) return "/v1/tokens/:mint";
+  if (path.startsWith("/v1/tx/")) return "/v1/tx/:signature";
+  if (path.startsWith("/v1/addresses/")) return "/v1/addresses/:address";
+  return path;
+}
+
+function isExpensivePath(path: string): boolean {
+  return EXPENSIVE_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+function pruneRateLimitMap(now: number): void {
+  for (const [key, entry] of rateLimitMap) {
+    if (now - entry.windowStartedAt >= RATE_LIMIT_WINDOW_MS * 2) {
+      rateLimitMap.delete(key);
+    }
+  }
+}
+
+app.addHook("onRequest", async (request, reply) => {
+  const now = Date.now();
+  if (rateLimitMap.size > 10_000) pruneRateLimitMap(now);
+
+  const path = normalizeRatePath(request.url);
+  if (path === "/health") return;
+  const ip = request.ip || "unknown";
+  const key = `${ip}:${path}`;
+  const limit = isExpensivePath(path) ? env.API_RATE_LIMIT_EXPENSIVE_PER_MIN : env.API_RATE_LIMIT_PER_MIN;
+  const existing = rateLimitMap.get(key);
+
+  if (!existing || now - existing.windowStartedAt >= RATE_LIMIT_WINDOW_MS) {
+    rateLimitMap.set(key, { windowStartedAt: now, count: 1 });
+    return;
+  }
+
+  existing.count += 1;
+  if (existing.count > limit) {
+    return reply.code(429).send({
+      error: "rate_limited",
+      message: "Too many requests for this endpoint; retry in one minute"
+    });
+  }
 });
 
 type SearchMatch = {
@@ -352,6 +417,28 @@ function dedupeMatches(matches: SearchMatch[]): SearchMatch[] {
   return unique;
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const safeLimit = Math.max(1, Math.min(limit, items.length || 1));
+  const out = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    for (;;) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      out[index] = await task(items[index], index);
+    }
+  };
+
+  await Promise.all(Array.from({ length: safeLimit }, () => worker()));
+  return out;
+}
+
 async function callSolanaRpcWithTimeout<T>(
   method: string,
   params: unknown[],
@@ -424,10 +511,27 @@ function readCache<T>(key: string): T | null {
   return hit.value as T;
 }
 
+function pruneMemoryCache(now: number): void {
+  for (const [key, entry] of memoryCache) {
+    if (now >= entry.expiresAt) {
+      memoryCache.delete(key);
+    }
+  }
+}
+
 function writeCache<T>(key: string, value: T, ttlMs: number): T {
+  const now = Date.now();
+  if (memoryCache.size >= env.API_CACHE_MAX_ENTRIES) {
+    pruneMemoryCache(now);
+  }
+  while (memoryCache.size >= env.API_CACHE_MAX_ENTRIES) {
+    const oldest = memoryCache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    memoryCache.delete(oldest);
+  }
   memoryCache.set(key, {
     value,
-    expiresAt: Date.now() + ttlMs
+    expiresAt: now + ttlMs
   });
   return value;
 }
@@ -470,9 +574,37 @@ function decodeU64FromBase64Slice(base64: string): string | null {
 
 function uiFromRaw(raw: string, decimals: number | null): number | null {
   if (decimals === null || decimals < 0) return null;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return null;
-  return n / Math.pow(10, decimals);
+  if (!/^\d+$/.test(raw)) return null;
+  try {
+    const scale = 10n ** BigInt(decimals);
+    const base = BigInt(raw);
+    // Convert to Number only when precision is safe.
+    if (base <= BigInt(Number.MAX_SAFE_INTEGER) * scale) {
+      return Number(base) / Number(scale);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function uiStringFromRaw(raw: string, decimals: number | null, maxFractionDigits = 6): string | null {
+  if (decimals === null || decimals < 0) return null;
+  if (!/^\d+$/.test(raw)) return null;
+  try {
+    const value = BigInt(raw);
+    const scale = 10n ** BigInt(decimals);
+    const whole = value / scale;
+    const fraction = value % scale;
+    if (decimals === 0) return whole.toString();
+
+    const fractionPadded = fraction.toString().padStart(decimals, "0");
+    const fractionCapped = fractionPadded.slice(0, Math.max(0, maxFractionDigits));
+    const fractionTrimmed = fractionCapped.replace(/0+$/, "");
+    return fractionTrimmed.length > 0 ? `${whole.toString()}.${fractionTrimmed}` : whole.toString();
+  } catch {
+    return null;
+  }
 }
 
 function selectBestDexPair(pairs: DexScreenerPair[] | null | undefined, mint: string): DexScreenerPair | null {
@@ -944,7 +1076,7 @@ app.get("/v1/search", async (request) => {
       id: exactProgram.rows[0].program_id,
       title: exactProgram.rows[0].program_id,
       subtitle: "Program account",
-      href: `/address/${exactProgram.rows[0].program_id}`,
+      href: `/address/${encodeURIComponent(exactProgram.rows[0].program_id)}`,
       exact: true,
       confidence: 0.99,
       updatedAt: exactProgram.rows[0].updated_at
@@ -956,7 +1088,7 @@ app.get("/v1/search", async (request) => {
       id: exactAddress.rows[0].wallet_address,
       title: exactAddress.rows[0].wallet_address,
       subtitle: "Known address profile",
-      href: `/address/${exactAddress.rows[0].wallet_address}`,
+      href: `/address/${encodeURIComponent(exactAddress.rows[0].wallet_address)}`,
       exact: true,
       confidence: 0.98,
       updatedAt: exactAddress.rows[0].updated_at
@@ -968,7 +1100,7 @@ app.get("/v1/search", async (request) => {
       id: exactTx.rows[0].signature,
       title: exactTx.rows[0].signature,
       subtitle: "Transaction signature",
-      href: `/tx/${exactTx.rows[0].signature}`,
+      href: `/tx/${encodeURIComponent(exactTx.rows[0].signature)}`,
       exact: true,
       confidence: 1,
       updatedAt: exactTx.rows[0].created_at
@@ -982,7 +1114,7 @@ app.get("/v1/search", async (request) => {
         id: row.program_id,
         title: row.program_id,
         subtitle: "Program prefix match",
-        href: `/address/${row.program_id}`,
+        href: `/address/${encodeURIComponent(row.program_id)}`,
         exact: false,
         confidence: 0.79,
         updatedAt: row.updated_at
@@ -994,7 +1126,7 @@ app.get("/v1/search", async (request) => {
         id: row.wallet_address,
         title: row.wallet_address,
         subtitle: "Address prefix match",
-        href: `/address/${row.wallet_address}`,
+        href: `/address/${encodeURIComponent(row.wallet_address)}`,
         exact: false,
         confidence: 0.75,
         updatedAt: row.updated_at
@@ -1006,7 +1138,7 @@ app.get("/v1/search", async (request) => {
         id: row.signature,
         title: row.signature,
         subtitle: "Transaction prefix match",
-        href: `/tx/${row.signature}`,
+        href: `/tx/${encodeURIComponent(row.signature)}`,
         exact: false,
         confidence: 0.82,
         updatedAt: row.created_at
@@ -1033,7 +1165,7 @@ app.get("/v1/search", async (request) => {
           id: query.q,
           title: query.q,
           subtitle: "Likely transaction signature",
-          href: `/tx/${query.q}`,
+          href: `/tx/${encodeURIComponent(query.q)}`,
           exact: false,
           confidence: 0.61,
           updatedAt: null
@@ -1046,7 +1178,7 @@ app.get("/v1/search", async (request) => {
           id: query.q,
           title: query.q,
           subtitle: "Likely address",
-          href: `/address/${query.q}`,
+          href: `/address/${encodeURIComponent(query.q)}`,
           exact: false,
           confidence: 0.56,
           updatedAt: null
@@ -1285,26 +1417,11 @@ app.get("/v1/network/overview", async () => {
   const mergedPayload = {
     ...payload,
     supply: {
-      totalSol:
-        payload.supply.totalSol !== null && payload.supply.totalSol > 0
-          ? payload.supply.totalSol
-          : maybeNumber(lastGood?.supply?.totalSol),
-      circulatingSol:
-        payload.supply.circulatingSol !== null && payload.supply.circulatingSol > 0
-          ? payload.supply.circulatingSol
-          : maybeNumber(lastGood?.supply?.circulatingSol),
-      nonCirculatingSol:
-        payload.supply.nonCirculatingSol !== null && payload.supply.nonCirculatingSol > 0
-          ? payload.supply.nonCirculatingSol
-          : maybeNumber(lastGood?.supply?.nonCirculatingSol),
-      circulatingPct:
-        payload.supply.circulatingPct !== null && payload.supply.circulatingPct > 0
-          ? payload.supply.circulatingPct
-          : maybeNumber(lastGood?.supply?.circulatingPct),
-      nonCirculatingPct:
-        payload.supply.nonCirculatingPct !== null && payload.supply.nonCirculatingPct > 0
-          ? payload.supply.nonCirculatingPct
-          : maybeNumber(lastGood?.supply?.nonCirculatingPct)
+      totalSol: payload.supply.totalSol ?? maybeNumber(lastGood?.supply?.totalSol),
+      circulatingSol: payload.supply.circulatingSol ?? maybeNumber(lastGood?.supply?.circulatingSol),
+      nonCirculatingSol: payload.supply.nonCirculatingSol ?? maybeNumber(lastGood?.supply?.nonCirculatingSol),
+      circulatingPct: payload.supply.circulatingPct ?? maybeNumber(lastGood?.supply?.circulatingPct),
+      nonCirculatingPct: payload.supply.nonCirculatingPct ?? maybeNumber(lastGood?.supply?.nonCirculatingPct)
     },
     epoch: {
       ...payload.epoch,
@@ -1327,26 +1444,11 @@ app.get("/v1/network/overview", async () => {
       avgFeeLamports: payload.network.avgFeeLamports ?? lastGood?.network?.avgFeeLamports ?? null
     },
     stake: {
-      totalSol:
-        payload.stake.totalSol !== null && payload.stake.totalSol > 0
-          ? payload.stake.totalSol
-          : maybeNumber(lastGood?.stake?.totalSol),
-      currentSol:
-        payload.stake.currentSol !== null && payload.stake.currentSol > 0
-          ? payload.stake.currentSol
-          : maybeNumber(lastGood?.stake?.currentSol),
-      delinquentSol:
-        payload.stake.delinquentSol !== null && payload.stake.delinquentSol > 0
-          ? payload.stake.delinquentSol
-          : maybeNumber(lastGood?.stake?.delinquentSol),
-      currentPct:
-        payload.stake.currentPct !== null && payload.stake.currentPct > 0
-          ? payload.stake.currentPct
-          : maybeNumber(lastGood?.stake?.currentPct),
-      delinquentPct:
-        payload.stake.delinquentPct !== null && payload.stake.delinquentPct > 0
-          ? payload.stake.delinquentPct
-          : maybeNumber(lastGood?.stake?.delinquentPct)
+      totalSol: payload.stake.totalSol ?? maybeNumber(lastGood?.stake?.totalSol),
+      currentSol: payload.stake.currentSol ?? maybeNumber(lastGood?.stake?.currentSol),
+      delinquentSol: payload.stake.delinquentSol ?? maybeNumber(lastGood?.stake?.delinquentSol),
+      currentPct: payload.stake.currentPct ?? maybeNumber(lastGood?.stake?.currentPct),
+      delinquentPct: payload.stake.delinquentPct ?? maybeNumber(lastGood?.stake?.delinquentPct)
     }
   };
 
@@ -1558,6 +1660,7 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
   const supplyRaw = supply?.value.amount ?? runtime.tokenMint?.supplyRaw ?? supplyRawEstimated;
   const supplyUiString =
     supply?.value.uiAmountString ??
+    (supplyRaw ? uiStringFromRaw(supplyRaw, decimals, 9) : null) ??
     (supplyUi !== null && supplyUi !== undefined ? supplyUi.toLocaleString("en-US") : null);
 
   const baseAddress = maybeString(bestDexPair?.baseToken?.address);
@@ -1603,12 +1706,13 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
           const amountRaw = decodeU64FromBase64Slice(encoded);
           if (!amountRaw) return null;
           const amountUi = uiFromRaw(amountRaw, decimals);
+          const amountUiString = uiStringFromRaw(amountRaw, decimals, 6) ?? amountRaw;
           return {
             address: row.pubkey,
             amount: amountRaw,
             decimals: decimals ?? 0,
             uiAmount: amountUi,
-            uiAmountString: amountUi !== null ? amountUi.toLocaleString("en-US", { maximumFractionDigits: 6 }) : amountRaw
+            uiAmountString: amountUiString
           };
         })
         .filter((row): row is NonNullable<typeof row> => row !== null)
@@ -1647,15 +1751,18 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
     };
   });
 
-  const holderSignaturesBatches = await Promise.all(
-    holders.slice(0, 8).map((holder) =>
-      callSolanaRpcWithTimeout<RpcSignatureInfo[]>(
-        "getSignaturesForAddress",
-        [holder.address, { limit: 12, commitment: "confirmed" }],
-        4500
+  const shouldProbeHolderSignatures = (signaturesByMint?.length ?? 0) < 12;
+  const holderSignaturesBatches = shouldProbeHolderSignatures
+    ? await Promise.all(
+        holders.slice(0, 4).map((holder) =>
+          callSolanaRpcWithTimeout<RpcSignatureInfo[]>(
+            "getSignaturesForAddress",
+            [holder.address, { limit: 8, commitment: "confirmed" }],
+            4500
+          )
+        )
       )
-    )
-  );
+    : [];
 
   const signatureMap = new Map<string, RpcSignatureInfo>();
   for (const row of signaturesByMint ?? []) {
@@ -1671,27 +1778,36 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
 
   const signatureCandidates = Array.from(signatureMap.values())
     .sort((a, b) => b.slot - a.slot)
-    .slice(0, 60);
+    .slice(0, 30);
 
-  const txRows = await Promise.all(
-    signatureCandidates.map(async (sig) => {
-      const tx = await fetchTransactionForAction(sig.signature);
-      if (!tx) return [];
-      const transferRows = extractTokenTransferRows(tx, params.mint, decimals);
-      return transferRows.map((row) => ({
-        signature: sig.signature,
-        slot: tx.slot,
-        blockTime: tx.blockTime,
-        success: tx.meta ? tx.meta.err === null : sig.err === null,
-        action: row.action,
-        amountRaw: row.amountRaw,
-        amountUi: row.amountUi,
-        source: row.source,
-        destination: row.destination,
-        authority: row.authority
-      }));
-    })
-  );
+  const txRows = await mapWithConcurrency(signatureCandidates, 6, async (sig) => {
+    const tx = await fetchTransactionForAction(sig.signature);
+    if (!tx) return [] as Array<{
+      signature: string;
+      slot: number;
+      blockTime: number | null;
+      success: boolean;
+      action: string;
+      amountRaw: string | null;
+      amountUi: number | null;
+      source: string | null;
+      destination: string | null;
+      authority: string | null;
+    }>;
+    const transferRows = extractTokenTransferRows(tx, params.mint, decimals);
+    return transferRows.map((row) => ({
+      signature: sig.signature,
+      slot: tx.slot,
+      blockTime: tx.blockTime,
+      success: tx.meta ? tx.meta.err === null : sig.err === null,
+      action: row.action,
+      amountRaw: row.amountRaw,
+      amountUi: row.amountUi,
+      source: row.source,
+      destination: row.destination,
+      authority: row.authority
+    }));
+  });
 
   const recentTransfers = txRows.flat().slice(0, 24);
 
@@ -1732,7 +1848,7 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
     recentTransfers
   };
 
-  return writeCache(cacheKey, payload, 12000);
+  return writeCache(cacheKey, payload, 30000);
 });
 
 app.get("/v1/transactions/live", async (request) => {
@@ -1831,7 +1947,7 @@ app.get("/v1/transactions/live", async (request) => {
         signature,
         slot: tx.slot,
         block_time: tx.blockTime,
-        success: tx.meta ? tx.meta.err === null : true,
+        success: tx.meta ? tx.meta.err === null : false,
         fee_lamports: tx.meta?.fee ?? 0,
         action: extractActionLabel(tx),
         source: "rpc_live"
@@ -1984,7 +2100,7 @@ app.get("/v1/tx/:signature", async (request, reply) => {
     signature: row?.signature ?? params.signature,
     slot: row?.slot ?? parsedRpcTx?.slot ?? null,
     blockTime: row?.block_time ?? parsedRpcTx?.blockTime ?? null,
-    success: row ? Boolean(row.success) : parsedRpcTx ? parsedRpcTx.meta?.err === null : true,
+    success: row ? Boolean(row.success) : parsedRpcTx?.meta ? parsedRpcTx.meta.err === null : false,
     feeLamports: row?.fee_lamports ?? parsedRpcTx?.meta?.fee ?? 0,
     computeUnits: row?.compute_units ?? parsedRpcTx?.meta?.computeUnitsConsumed ?? null,
     priorityFeeLamports: row?.priority_fee_lamports ?? null,

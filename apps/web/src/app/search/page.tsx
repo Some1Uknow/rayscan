@@ -110,7 +110,7 @@ export default async function SearchPage({
             <article className="panel">
               <h3 className="feature-title">Open As Address / Mint</h3>
               <p className="feature-copy">{q}</p>
-              <Link className="ghost-button link-button" href={`/address/${q}`}>
+              <Link className="ghost-button link-button" href={`/address/${encodeURIComponent(q)}`}>
                 Go to Address Page
               </Link>
             </article>

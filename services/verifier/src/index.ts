@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { InMemoryPriorityQueue } from "./queue.js";
 import { assertTransition } from "./state-machine.js";
@@ -15,6 +16,23 @@ import type { RunStatus, VerificationJob } from "./types.js";
 
 export function nowMs(): number {
   return Date.now();
+}
+
+function jobDedupKey(job: VerificationJob): string {
+  return [
+    job.programId,
+    job.sourceCommit ?? "none",
+    job.toolchainDigest ?? "none"
+  ].join(":");
+}
+
+function isAuthorizedVerifierRequest(tokenHeader: string | undefined): boolean {
+  if (!env.VERIFIER_INTERNAL_TOKEN) return false;
+  if (!tokenHeader) return false;
+  const expected = Buffer.from(env.VERIFIER_INTERNAL_TOKEN);
+  const received = Buffer.from(tokenHeader);
+  if (expected.length !== received.length) return false;
+  return timingSafeEqual(expected, received);
 }
 
 async function processJob(job: VerificationJob): Promise<void> {
@@ -66,19 +84,24 @@ async function processJob(job: VerificationJob): Promise<void> {
   }
 }
 
-async function workerLoop(queue: InMemoryPriorityQueue): Promise<void> {
+async function workerLoop(queue: InMemoryPriorityQueue, activeKeys: Set<string>): Promise<void> {
   for (;;) {
     const next = queue.dequeue();
     if (!next) {
       await new Promise((resolve) => setTimeout(resolve, env.VERIFIER_LOOP_INTERVAL_MS));
       continue;
     }
-    await processJob(next);
+    try {
+      await processJob(next);
+    } finally {
+      activeKeys.delete(jobDedupKey(next));
+    }
   }
 }
 
 async function main(): Promise<void> {
   const queue = new InMemoryPriorityQueue();
+  const activeKeys = new Set<string>();
   const app = Fastify({ logger: true });
 
   app.get("/health", async () => ({
@@ -87,6 +110,22 @@ async function main(): Promise<void> {
   }));
 
   app.post("/internal/v1/verifications/:programId/run", async (request, reply) => {
+    if (!env.VERIFIER_INTERNAL_TOKEN) {
+      return reply.code(404).send({
+        error: "not_enabled",
+        message: "Manual verification trigger endpoint is disabled"
+      });
+    }
+
+    const tokenHeaderRaw = request.headers["x-verifier-token"];
+    const tokenHeader = Array.isArray(tokenHeaderRaw) ? tokenHeaderRaw[0] : tokenHeaderRaw;
+    if (!isAuthorizedVerifierRequest(tokenHeader)) {
+      return reply.code(401).send({
+        error: "unauthorized",
+        message: "Missing or invalid verifier token"
+      });
+    }
+
     const params = z.object({ programId: z.string().min(32).max(64) }).parse(request.params);
     const body = z
       .object({
@@ -110,6 +149,16 @@ async function main(): Promise<void> {
       toolchainDigest: body.toolchainDigest,
       enqueuedAtMs: nowMs()
     };
+    const dedupKey = jobDedupKey(job);
+    if (activeKeys.has(dedupKey)) {
+      return reply.code(202).send({
+        queued: false,
+        duplicate: true,
+        programId: params.programId,
+        queueDepth: queue.size()
+      });
+    }
+    activeKeys.add(dedupKey);
     queue.enqueue(job);
 
     return reply.code(202).send({
@@ -119,8 +168,8 @@ async function main(): Promise<void> {
     });
   });
 
-  void workerLoop(queue);
-  await app.listen({ port: env.VERIFIER_PORT, host: "0.0.0.0" });
+  void workerLoop(queue, activeKeys);
+  await app.listen({ port: env.VERIFIER_PORT, host: env.VERIFIER_HOST });
 
   const shutdown = async (code: number) => {
     await app.close();

@@ -96,11 +96,22 @@ CREATE TABLE IF NOT EXISTS wallet_profiles (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 CREATE INDEX IF NOT EXISTS idx_tx_index_slot ON tx_index(slot DESC);
+CREATE INDEX IF NOT EXISTS idx_tx_index_created_at ON tx_index(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pools_pair ON pools(base_mint, quote_mint);
+CREATE INDEX IF NOT EXISTS idx_wallet_profiles_last_seen_slot
+  ON wallet_profiles(last_seen_slot DESC NULLS LAST, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_program_verifications_status
   ON program_verifications(verification_status, last_checked_at DESC);
 CREATE INDEX IF NOT EXISTS idx_verification_runs_program_created
   ON verification_runs(program_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_verification_runs_status
   ON verification_runs(run_status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_programs_program_id_trgm
+  ON programs USING gin (program_id gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_wallet_profiles_address_trgm
+  ON wallet_profiles USING gin (wallet_address gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_tx_index_signature_trgm
+  ON tx_index USING gin (signature gin_trgm_ops);
