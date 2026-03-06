@@ -1,6 +1,7 @@
 # Repo Blueprint
 
 ## Directory Tree
+
 ```text
 rayscan/
   apps/
@@ -59,12 +60,11 @@ rayscan/
     docker-compose.local.yml
   docs/
     architecture.md
-    roadmap-14d.md
     repo-blueprint.md
-    verifier-spec.md
 ```
 
 ## Ownership Map
+
 - `apps/web`: user-facing UX, branding, route composition.
 - `services/indexer-stream`: real-time ingest and decode.
 - `services/indexer-backfill`: replay, repair, and consistency.
@@ -77,7 +77,9 @@ rayscan/
 ## Service Contracts
 
 ### Event Bus Contract
+
 Topic names:
+
 - `slot.finalized`
 - `raydium.swap.executed`
 - `raydium.pool.updated`
@@ -87,6 +89,7 @@ Topic names:
 - `program.verification.completed`
 
 Event envelope:
+
 ```json
 {
   "eventId": "uuid",
@@ -100,23 +103,28 @@ Event envelope:
 ```
 
 Idempotency key:
+
 - `eventType + slot + signature + ixIndex`
 
 Verification run key:
+
 - `programId + sourceCommit + toolchainDigest`
 
 ### API Contract Principles
+
 - always cursor-pagination for list endpoints
 - stable field names across REST and GraphQL
 - include `sourceSlot` and `source` metadata in all responses
 - include `verificationCheckedAt` and `verificationSource` for program endpoints
 
 ## Versioning Rules
+
 - external API: semantic versioning (`/v1`)
 - event payloads: additive changes only in same version
 - decoder outputs: snapshot tests per Raydium program type
 
 ## Testing Matrix
+
 - unit: decoder parser fixtures
 - unit: verifier log parser fixtures
 - contract: REST/GraphQL schema contract tests
@@ -125,6 +133,7 @@ Verification run key:
 - load: top endpoints and search with realistic QPS
 
 ## Suggested First Milestones
+
 1. Implement `raydium.swap.executed` pipeline end-to-end.
 2. Ship `/tx/[signature]` + `/live` page.
 3. Add pool detail route with 24h aggregates.

@@ -30,11 +30,9 @@ General-purpose Solana explorer blueprint with Raydium-first depth, optimized fo
 ## Quick Start (Blueprint Mode)
 1. Read [docs/repo-blueprint.md](/Users/raghavsharma/Documents/rayscan/docs/repo-blueprint.md).
 2. Read [docs/architecture.md](/Users/raghavsharma/Documents/rayscan/docs/architecture.md).
-3. Read [docs/verifier-spec.md](/Users/raghavsharma/Documents/rayscan/docs/verifier-spec.md).
-4. Install dependencies with `pnpm install`.
-5. Run local infra from [ops/docker-compose.local.yml](/Users/raghavsharma/Documents/rayscan/ops/docker-compose.local.yml).
-6. Initialize schema with `pnpm db:init:pg` and `pnpm db:init:ch`.
-7. Implement Day 1-3 tasks in [docs/roadmap-14d.md](/Users/raghavsharma/Documents/rayscan/docs/roadmap-14d.md).
+3. Install dependencies with `pnpm install`.
+4. Run local infra from [ops/docker-compose.local.yml](/Users/raghavsharma/Documents/rayscan/ops/docker-compose.local.yml).
+5. Initialize schema with `pnpm db:init:pg` and `pnpm db:init:ch`.
 
 ## Dev Commands
 - `pnpm api:dev`
