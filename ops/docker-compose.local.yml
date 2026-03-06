@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: rayscan-postgres
+    environment:
+      POSTGRES_USER: rayscan
+      POSTGRES_PASSWORD: rayscan
+      POSTGRES_DB: rayscan
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12
+    container_name: rayscan-clickhouse
+    environment:
+      CLICKHOUSE_USER: rayscan
+      CLICKHOUSE_PASSWORD: rayscan
+      CLICKHOUSE_DB: rayscan
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ch_data:/var/lib/clickhouse
+
+  redis:
+    image: redis:7
+    container_name: rayscan-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  pg_data:
+  ch_data:
+  redis_data:

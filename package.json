@@ -1,0 +1,16 @@
+{
+  "name": "rayscan",
+  "private": true,
+  "version": "0.1.0",
+  "description": "General-purpose Solana explorer with Raydium depth",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "infra:up": "docker compose -f ops/docker-compose.local.yml up -d",
+    "infra:down": "docker compose -f ops/docker-compose.local.yml down",
+    "db:init:pg": "psql \"$POSTGRES_URL\" -f schemas/postgres/001_init.sql",
+    "db:init:ch": "clickhouse-client --queries-file schemas/clickhouse/001_init.sql",
+    "api:dev": "pnpm --filter @rayscan/api dev",
+    "web:dev": "pnpm --filter @rayscan/web dev",
+    "verifier:dev": "pnpm --filter @rayscan/verifier dev"
+  }
+}
