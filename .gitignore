@@ -51,3 +51,5 @@ test-results/
 # Local reference captures (non-product assets)
 raydium-*.png
 rayscan-*.png
+
+.env
