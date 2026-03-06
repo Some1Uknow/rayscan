@@ -107,6 +107,11 @@ type RpcParsedInstruction = {
   parsed?: unknown;
 };
 
+type RpcParsedInnerInstruction = {
+  index: number;
+  instructions: RpcParsedInstruction[];
+};
+
 type RpcAccountKey =
   | string
   | {
@@ -126,6 +131,7 @@ type RpcParsedTransactionResult = {
     logMessages?: string[] | null;
     preBalances?: number[] | null;
     postBalances?: number[] | null;
+    innerInstructions?: RpcParsedInnerInstruction[] | null;
   } | null;
   transaction: {
     message: {
@@ -133,6 +139,83 @@ type RpcParsedTransactionResult = {
       accountKeys: RpcAccountKey[];
     };
   };
+};
+
+type RpcAccountInfoValue = {
+  executable?: unknown;
+  owner?: unknown;
+  lamports?: unknown;
+  data?: unknown;
+};
+
+type RpcGetAccountInfoResult = {
+  context: { slot: number };
+  value: RpcAccountInfoValue | null;
+};
+
+type RpcTokenSupplyResult = {
+  context: { slot: number };
+  value: {
+    amount: string;
+    decimals: number;
+    uiAmount: number | null;
+    uiAmountString: string;
+  };
+};
+
+type RpcTokenLargestAccountsResult = {
+  context: { slot: number };
+  value: Array<{
+    address: string;
+    amount: string;
+    decimals: number;
+    uiAmount: number | null;
+    uiAmountString: string;
+  }>;
+};
+
+type RpcSignatureInfo = {
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  err: unknown;
+};
+
+type RpcProgramAccountSlice = {
+  pubkey: string;
+  account: {
+    data: [string, string] | string;
+  };
+};
+
+type RuntimeAddressSummary = {
+  exists: boolean;
+  classification: "token_mint" | "token_account" | "program" | "system_account" | "unknown";
+  ownerProgram: string | null;
+  executable: boolean;
+  lamports: number | null;
+  tokenMint: {
+    decimals: number | null;
+    supplyRaw: string | null;
+    supplyUi: number | null;
+    mintAuthority: string | null;
+    freezeAuthority: string | null;
+    isInitialized: boolean | null;
+  } | null;
+  tokenAccount: {
+    mint: string | null;
+    owner: string | null;
+    state: string | null;
+    amountRaw: string | null;
+    amountUi: number | null;
+    decimals: number | null;
+  } | null;
+  knownToken: {
+    mint: string;
+    symbol: string;
+    name: string;
+    iconUrl: string;
+  } | null;
 };
 
 type CoinGeckoMarketRow = {
@@ -145,11 +228,42 @@ type CoinGeckoMarketRow = {
   price_change_percentage_24h: number | null;
 };
 
+type DexScreenerPair = {
+  chainId?: unknown;
+  priceUsd?: unknown;
+  marketCap?: unknown;
+  fdv?: unknown;
+  priceChange?: {
+    h24?: unknown;
+  } | null;
+  liquidity?: {
+    usd?: unknown;
+  } | null;
+  baseToken?: {
+    address?: unknown;
+    symbol?: unknown;
+    name?: unknown;
+  } | null;
+  quoteToken?: {
+    address?: unknown;
+    symbol?: unknown;
+    name?: unknown;
+  } | null;
+  info?: {
+    imageUrl?: unknown;
+  } | null;
+};
+
+type DexScreenerTokenResult = {
+  pairs?: DexScreenerPair[] | null;
+};
+
 type TopTokenConfig = {
   id: string;
   mint: string;
   symbol: string;
   name: string;
+  decimals: number;
   fallbackIcon: string;
 };
 
@@ -159,6 +273,7 @@ const TOP_TOKEN_CONFIG: TopTokenConfig[] = [
     mint: "So11111111111111111111111111111111111111112",
     symbol: "SOL",
     name: "Solana",
+    decimals: 9,
     fallbackIcon: "https://assets.coingecko.com/coins/images/4128/large/solana.png"
   },
   {
@@ -166,6 +281,7 @@ const TOP_TOKEN_CONFIG: TopTokenConfig[] = [
     mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     symbol: "USDC",
     name: "USDC",
+    decimals: 6,
     fallbackIcon:
       "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png"
   },
@@ -174,6 +290,7 @@ const TOP_TOKEN_CONFIG: TopTokenConfig[] = [
     mint: "Es9vMFrzaCERz6fV3uUjzszbmWzxubAEANe1yoynZMHx",
     symbol: "USDT",
     name: "USDT",
+    decimals: 6,
     fallbackIcon:
       "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERz6fV3uUjzszbmWzxubAEANe1yoynZMHx/logo.png"
   },
@@ -182,6 +299,7 @@ const TOP_TOKEN_CONFIG: TopTokenConfig[] = [
     mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
     symbol: "JUP",
     name: "Jupiter",
+    decimals: 6,
     fallbackIcon:
       "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN/logo.png"
   },
@@ -190,6 +308,7 @@ const TOP_TOKEN_CONFIG: TopTokenConfig[] = [
     mint: "4k3Dyjzvzp8eMZwS1y6TQitQxPP5f7M4M4DQh8pwJH7n",
     symbol: "RAY",
     name: "Raydium",
+    decimals: 6,
     fallbackIcon:
       "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/4k3Dyjzvzp8eMZwS1y6TQitQxPP5f7M4M4DQh8pwJH7n/logo.png"
   },
@@ -198,6 +317,7 @@ const TOP_TOKEN_CONFIG: TopTokenConfig[] = [
     mint: "DezXAZ8z7PnrnRJjz3wXBoRGzz6kVZca6hJr72Y7g4s",
     symbol: "BONK",
     name: "Bonk",
+    decimals: 5,
     fallbackIcon:
       "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/DezXAZ8z7PnrnRJjz3wXBoRGzz6kVZca6hJr72Y7g4s/logo.png"
   }
@@ -209,6 +329,16 @@ type MemoryCacheEntry = {
 };
 
 const memoryCache = new Map<string, MemoryCacheEntry>();
+
+const RPC_FALLBACK_URLS = [
+  "https://rpc.ankr.com/solana",
+  "https://solana.publicnode.com"
+];
+
+function rpcCandidates(): string[] {
+  const ordered = [env.SOLANA_RPC_URL, ...RPC_FALLBACK_URLS];
+  return Array.from(new Set(ordered));
+}
 
 function dedupeMatches(matches: SearchMatch[]): SearchMatch[] {
   const seen = new Set<string>();
@@ -227,11 +357,27 @@ async function callSolanaRpcWithTimeout<T>(
   params: unknown[],
   timeoutMs: number
 ): Promise<T | null> {
+  const endpoints = rpcCandidates();
+  for (const endpoint of endpoints) {
+    const result = await callSolanaRpcAtEndpoint<T>(endpoint, method, params, timeoutMs);
+    if (result !== null) {
+      return result;
+    }
+  }
+  return null;
+}
+
+async function callSolanaRpcAtEndpoint<T>(
+  endpoint: string,
+  method: string,
+  params: unknown[],
+  timeoutMs: number
+): Promise<T | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(env.SOLANA_RPC_URL, {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -293,6 +439,195 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T | 
 function lamportsToSol(value: number | null | undefined): number {
   if (value === null || value === undefined || Number.isNaN(value)) return 0;
   return value / 1_000_000_000;
+}
+
+function maybeString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function maybeNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function decodeU64FromBase64Slice(base64: string): string | null {
+  try {
+    const bytes = Buffer.from(base64, "base64");
+    if (bytes.length < 8) return null;
+    let value = 0n;
+    for (let i = 0; i < 8; i += 1) {
+      value += BigInt(bytes[i] ?? 0) << (BigInt(i) * 8n);
+    }
+    return value.toString();
+  } catch {
+    return null;
+  }
+}
+
+function uiFromRaw(raw: string, decimals: number | null): number | null {
+  if (decimals === null || decimals < 0) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return n / Math.pow(10, decimals);
+}
+
+function selectBestDexPair(pairs: DexScreenerPair[] | null | undefined, mint: string): DexScreenerPair | null {
+  if (!pairs || pairs.length === 0) return null;
+
+  const isSolanaPair = (pair: DexScreenerPair): boolean => maybeString(pair.chainId) === "solana";
+  const hasMint = (pair: DexScreenerPair): boolean => {
+    const base = maybeString(pair.baseToken?.address);
+    const quote = maybeString(pair.quoteToken?.address);
+    return base === mint || quote === mint;
+  };
+  const liquidityScore = (pair: DexScreenerPair): number => maybeNumber(pair.liquidity?.usd) ?? 0;
+
+  return pairs
+    .filter((pair) => isSolanaPair(pair) && hasMint(pair))
+    .sort((a, b) => liquidityScore(b) - liquidityScore(a))[0] ?? null;
+}
+
+async function fetchRuntimeAddressSummary(address: string): Promise<RuntimeAddressSummary> {
+  const knownByAddress = TOP_TOKEN_CONFIG.find((token) => token.mint === address) ?? null;
+  const fallback: RuntimeAddressSummary = {
+    exists: Boolean(knownByAddress),
+    classification: knownByAddress ? "token_mint" : "unknown",
+    ownerProgram: null,
+    executable: false,
+    lamports: null,
+    tokenMint: null,
+    tokenAccount: null,
+    knownToken: knownByAddress
+      ? {
+          mint: knownByAddress.mint,
+          symbol: knownByAddress.symbol,
+          name: knownByAddress.name,
+          iconUrl: knownByAddress.fallbackIcon
+        }
+      : null
+  };
+
+  const accountInfo = await callSolanaRpcWithTimeout<RpcGetAccountInfoResult>(
+    "getAccountInfo",
+    [address, { encoding: "jsonParsed", commitment: "confirmed" }],
+    2500
+  );
+
+  if (!accountInfo?.value) {
+    return fallback;
+  }
+
+  const value = accountInfo.value;
+  const ownerProgram = maybeString(value.owner);
+  const lamports = maybeNumber(value.lamports);
+  const executable = Boolean(value.executable);
+
+  const parsedContainer =
+    value.data && typeof value.data === "object" && !Array.isArray(value.data)
+      ? (value.data as { parsed?: unknown })
+      : null;
+  const parsed =
+    parsedContainer?.parsed && typeof parsedContainer.parsed === "object"
+      ? (parsedContainer.parsed as { type?: unknown; info?: unknown })
+      : null;
+
+  const parsedType = maybeString(parsed?.type);
+  const parsedInfo =
+    parsed?.info && typeof parsed.info === "object" && !Array.isArray(parsed.info)
+      ? (parsed.info as Record<string, unknown>)
+      : null;
+
+  if (parsedType === "mint" && parsedInfo) {
+    const decimals = maybeNumber(parsedInfo.decimals);
+    const supplyRaw = parsedInfo.supply === undefined || parsedInfo.supply === null ? null : String(parsedInfo.supply);
+    const supplyNum = maybeNumber(parsedInfo.supply);
+    const supplyUi =
+      supplyNum !== null && decimals !== null && decimals >= 0 ? supplyNum / Math.pow(10, decimals) : null;
+
+    return {
+      exists: true,
+      classification: "token_mint",
+      ownerProgram,
+      executable,
+      lamports,
+      tokenMint: {
+        decimals,
+        supplyRaw,
+        supplyUi,
+        mintAuthority: maybeString(parsedInfo.mintAuthority),
+        freezeAuthority: maybeString(parsedInfo.freezeAuthority),
+        isInitialized: typeof parsedInfo.isInitialized === "boolean" ? parsedInfo.isInitialized : null
+      },
+      tokenAccount: null,
+      knownToken: knownByAddress
+        ? {
+            mint: knownByAddress.mint,
+            symbol: knownByAddress.symbol,
+            name: knownByAddress.name,
+            iconUrl: knownByAddress.fallbackIcon
+          }
+        : null
+    };
+  }
+
+  if (parsedType === "account" && parsedInfo) {
+    const mint = maybeString(parsedInfo.mint);
+    const tokenAmount =
+      parsedInfo.tokenAmount && typeof parsedInfo.tokenAmount === "object" && !Array.isArray(parsedInfo.tokenAmount)
+        ? (parsedInfo.tokenAmount as Record<string, unknown>)
+        : null;
+    const amountRaw = tokenAmount?.amount === undefined || tokenAmount?.amount === null ? null : String(tokenAmount.amount);
+    const amountUi = maybeNumber(tokenAmount?.uiAmount);
+    const decimals = maybeNumber(tokenAmount?.decimals);
+    const knownByMint = mint ? TOP_TOKEN_CONFIG.find((token) => token.mint === mint) ?? null : null;
+
+    return {
+      exists: true,
+      classification: "token_account",
+      ownerProgram,
+      executable,
+      lamports,
+      tokenMint: null,
+      tokenAccount: {
+        mint,
+        owner: maybeString(parsedInfo.owner),
+        state: maybeString(parsedInfo.state),
+        amountRaw,
+        amountUi,
+        decimals
+      },
+      knownToken: knownByMint
+        ? {
+            mint: knownByMint.mint,
+            symbol: knownByMint.symbol,
+            name: knownByMint.name,
+            iconUrl: knownByMint.fallbackIcon
+          }
+        : null
+    };
+  }
+
+  return {
+    exists: true,
+    classification: executable ? "program" : ownerProgram === "11111111111111111111111111111111" ? "system_account" : "unknown",
+    ownerProgram,
+    executable,
+    lamports,
+    tokenMint: null,
+    tokenAccount: null,
+    knownToken: knownByAddress
+      ? {
+          mint: knownByAddress.mint,
+          symbol: knownByAddress.symbol,
+          name: knownByAddress.name,
+          iconUrl: knownByAddress.fallbackIcon
+        }
+      : null
+  };
 }
 
 function humanizeInstructionName(raw: string): string {
@@ -405,6 +740,97 @@ function buildInstructionRows(tx: RpcParsedTransactionResult): Array<{
     program: instructionProgram(ix),
     type: extractInstructionType(ix)
   }));
+}
+
+function extractTokenTransferRows(
+  tx: RpcParsedTransactionResult,
+  mint: string,
+  decimals: number | null
+): Array<{
+  index: number;
+  action: string;
+  amountRaw: string | null;
+  amountUi: number | null;
+  source: string | null;
+  destination: string | null;
+  authority: string | null;
+}> {
+  const rows: Array<{
+    index: number;
+    action: string;
+    amountRaw: string | null;
+    amountUi: number | null;
+    source: string | null;
+    destination: string | null;
+    authority: string | null;
+  }> = [];
+
+  const orderedInstructions: RpcParsedInstruction[] = [
+    ...tx.transaction.message.instructions,
+    ...(tx.meta?.innerInstructions ?? [])
+      .slice()
+      .sort((a, b) => a.index - b.index)
+      .flatMap((group) => group.instructions ?? [])
+  ];
+
+  orderedInstructions.forEach((ix, idx) => {
+    if (!ix.parsed || typeof ix.parsed !== "object") return;
+    const parsed = ix.parsed as { type?: unknown; info?: unknown };
+    const rawType = maybeString(parsed.type);
+    const info =
+      parsed.info && typeof parsed.info === "object" && !Array.isArray(parsed.info)
+        ? (parsed.info as Record<string, unknown>)
+        : null;
+    if (!rawType || !info) return;
+
+    const type = rawType.toLowerCase();
+    const accepted =
+      type === "transferchecked" ||
+      type === "transfer" ||
+      type === "mintto" ||
+      type === "minttochecked" ||
+      type === "burn" ||
+      type === "burnchecked";
+    if (!accepted) return;
+
+    const infoMint = maybeString(info.mint);
+    if (infoMint && infoMint !== mint) return;
+    if (!infoMint && type !== "transfer") return;
+
+    const tokenAmount =
+      info.tokenAmount && typeof info.tokenAmount === "object" && !Array.isArray(info.tokenAmount)
+        ? (info.tokenAmount as Record<string, unknown>)
+        : null;
+
+    const amountRaw = tokenAmount?.amount
+      ? String(tokenAmount.amount)
+      : info.amount !== undefined && info.amount !== null
+        ? String(info.amount)
+        : null;
+
+    const amountUi =
+      (tokenAmount ? maybeNumber(tokenAmount.uiAmount) : maybeNumber(info.uiAmount)) ??
+      (amountRaw ? uiFromRaw(amountRaw, decimals) : null);
+    rows.push({
+      index: idx + 1,
+      action: humanizeInstructionName(rawType),
+      amountRaw,
+      amountUi,
+      source: maybeString(info.source) ?? maybeString(info.account),
+      destination: maybeString(info.destination),
+      authority: maybeString(info.authority) ?? maybeString(info.owner)
+    });
+  });
+
+  const deduped = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    const key = `${row.action}:${row.amountRaw ?? "na"}:${row.source ?? "na"}:${row.destination ?? "na"}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, row);
+    }
+  }
+
+  return Array.from(deduped.values());
 }
 
 function buildAccountRows(tx: RpcParsedTransactionResult): Array<{
@@ -930,6 +1356,236 @@ app.get("/v1/markets/tokens", async (request) => {
   return writeCache(cacheKey, payload, 60000);
 });
 
+app.get("/v1/tokens/:mint", async (request, reply) => {
+  const params = z.object({ mint: z.string().min(32).max(64) }).parse(request.params);
+  const cacheKey = `token_detail:${params.mint}`;
+  const cached = readCache<Record<string, unknown>>(cacheKey);
+  if (cached) return cached;
+  const knownToken = TOP_TOKEN_CONFIG.find((token) => token.mint === params.mint) ?? null;
+
+  const [runtime, supply, largestAccounts, signaturesByMint, dexScreener, coingeckoRow] = await Promise.all([
+    fetchRuntimeAddressSummary(params.mint),
+    callSolanaRpcWithTimeout<RpcTokenSupplyResult>("getTokenSupply", [params.mint, { commitment: "confirmed" }], 9000),
+    callSolanaRpcWithTimeout<RpcTokenLargestAccountsResult>(
+      "getTokenLargestAccounts",
+      [params.mint, { commitment: "confirmed" }],
+      11000
+    ),
+    callSolanaRpcWithTimeout<RpcSignatureInfo[]>(
+      "getSignaturesForAddress",
+      [params.mint, { limit: 16, commitment: "confirmed" }],
+      4500
+    ),
+    fetchJsonWithTimeout<DexScreenerTokenResult>(`https://api.dexscreener.com/latest/dex/tokens/${params.mint}`, 3500),
+    knownToken
+      ? fetchJsonWithTimeout<CoinGeckoMarketRow[]>(
+          `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(knownToken.id)}&order=market_cap_desc&per_page=1&page=1&sparkline=false&price_change_percentage=24h`,
+          3000
+        )
+      : Promise.resolve(null)
+  ]);
+
+  if (!runtime.exists && !supply) {
+    return reply.code(404).send({
+      error: "not_found",
+      message: `Token mint not found: ${params.mint}`
+    });
+  }
+
+  const bestDexPair = selectBestDexPair(dexScreener?.pairs, params.mint);
+  const marketFallback = coingeckoRow?.[0] ?? null;
+  const marketPrice = maybeNumber(bestDexPair?.priceUsd) ?? marketFallback?.current_price ?? null;
+  const marketCap =
+    maybeNumber(bestDexPair?.marketCap) ?? maybeNumber(bestDexPair?.fdv) ?? marketFallback?.market_cap ?? null;
+
+  const decimals = supply?.value.decimals ?? runtime.tokenMint?.decimals ?? knownToken?.decimals ?? null;
+  const supplyUiEstimated =
+    marketPrice && marketPrice > 0 && marketCap && marketCap > 0 ? marketCap / marketPrice : null;
+  const supplyUi = supply?.value.uiAmount ?? runtime.tokenMint?.supplyUi ?? supplyUiEstimated ?? null;
+  const supplyRawEstimated =
+    supplyUi !== null && decimals !== null && decimals >= 0
+      ? Math.round(supplyUi * Math.pow(10, decimals)).toString()
+      : null;
+  const supplyRaw = supply?.value.amount ?? runtime.tokenMint?.supplyRaw ?? supplyRawEstimated;
+  const supplyUiString =
+    supply?.value.uiAmountString ??
+    (supplyUi !== null && supplyUi !== undefined ? supplyUi.toLocaleString("en-US") : null);
+
+  const baseAddress = maybeString(bestDexPair?.baseToken?.address);
+  const quoteAddress = maybeString(bestDexPair?.quoteToken?.address);
+  const identityToken = baseAddress === params.mint ? bestDexPair?.baseToken : quoteAddress === params.mint ? bestDexPair?.quoteToken : null;
+
+  const totalSupplyRawBigInt =
+    supplyRaw && /^\d+$/.test(supplyRaw)
+      ? (() => {
+          try {
+            return BigInt(supplyRaw);
+          } catch {
+            return null;
+          }
+        })()
+      : null;
+
+  let holderRows = largestAccounts?.value ?? [];
+
+  if (holderRows.length === 0) {
+    const tokenProgramId = runtime.ownerProgram ?? "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+    const fallbackAccounts = await callSolanaRpcWithTimeout<RpcProgramAccountSlice[]>(
+      "getProgramAccounts",
+      [
+        tokenProgramId,
+        {
+          encoding: "base64",
+          commitment: "confirmed",
+          filters: [
+            { dataSize: 165 },
+            { memcmp: { offset: 0, bytes: params.mint } }
+          ],
+          dataSlice: { offset: 64, length: 8 }
+        }
+      ],
+      16000
+    );
+
+    if (fallbackAccounts && fallbackAccounts.length > 0) {
+      holderRows = fallbackAccounts
+        .map((row) => {
+          const encoded = Array.isArray(row.account.data) ? row.account.data[0] : row.account.data;
+          const amountRaw = decodeU64FromBase64Slice(encoded);
+          if (!amountRaw) return null;
+          const amountUi = uiFromRaw(amountRaw, decimals);
+          return {
+            address: row.pubkey,
+            amount: amountRaw,
+            decimals: decimals ?? 0,
+            uiAmount: amountUi,
+            uiAmountString: amountUi !== null ? amountUi.toLocaleString("en-US", { maximumFractionDigits: 6 }) : amountRaw
+          };
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null)
+        .sort((a, b) => {
+          const ai = BigInt(a.amount);
+          const bi = BigInt(b.amount);
+          if (ai === bi) return 0;
+          return ai > bi ? -1 : 1;
+        })
+        .slice(0, 20);
+    }
+  }
+
+  const holders = holderRows.slice(0, 15).map((account, idx) => {
+    const amountRaw = account.amount;
+    const pctOfSupply =
+      totalSupplyRawBigInt && totalSupplyRawBigInt > 0n && /^\d+$/.test(amountRaw)
+        ? (() => {
+            try {
+              const holderAmount = BigInt(amountRaw);
+              const bps = Number((holderAmount * 10_000n) / totalSupplyRawBigInt);
+              return bps / 100;
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+
+    return {
+      rank: idx + 1,
+      address: account.address,
+      amountRaw,
+      amountUi: account.uiAmount,
+      amountUiString: account.uiAmountString,
+      pctOfSupply
+    };
+  });
+
+  const holderSignaturesBatches = await Promise.all(
+    holders.slice(0, 8).map((holder) =>
+      callSolanaRpcWithTimeout<RpcSignatureInfo[]>(
+        "getSignaturesForAddress",
+        [holder.address, { limit: 12, commitment: "confirmed" }],
+        4500
+      )
+    )
+  );
+
+  const signatureMap = new Map<string, RpcSignatureInfo>();
+  for (const row of signaturesByMint ?? []) {
+    signatureMap.set(row.signature, row);
+  }
+  for (const batch of holderSignaturesBatches) {
+    for (const row of batch ?? []) {
+      if (!signatureMap.has(row.signature)) {
+        signatureMap.set(row.signature, row);
+      }
+    }
+  }
+
+  const signatureCandidates = Array.from(signatureMap.values())
+    .sort((a, b) => b.slot - a.slot)
+    .slice(0, 60);
+
+  const txRows = await Promise.all(
+    signatureCandidates.map(async (sig) => {
+      const tx = await fetchTransactionForAction(sig.signature);
+      if (!tx) return [];
+      const transferRows = extractTokenTransferRows(tx, params.mint, decimals);
+      return transferRows.map((row) => ({
+        signature: sig.signature,
+        slot: tx.slot,
+        blockTime: tx.blockTime,
+        success: tx.meta ? tx.meta.err === null : sig.err === null,
+        action: row.action,
+        amountRaw: row.amountRaw,
+        amountUi: row.amountUi,
+        source: row.source,
+        destination: row.destination,
+        authority: row.authority
+      }));
+    })
+  );
+
+  const recentTransfers = txRows.flat().slice(0, 24);
+
+  const payload = {
+    mint: params.mint,
+    runtime,
+    identity: {
+      symbol:
+        maybeString(identityToken?.symbol) ??
+        runtime.knownToken?.symbol ??
+        knownToken?.symbol ??
+        null,
+      name:
+        maybeString(identityToken?.name) ??
+        runtime.knownToken?.name ??
+        knownToken?.name ??
+        null,
+      iconUrl:
+        maybeString(bestDexPair?.info?.imageUrl) ??
+        runtime.knownToken?.iconUrl ??
+        knownToken?.fallbackIcon ??
+        null
+    },
+    market: {
+      priceUsd: marketPrice,
+      change24hPct: maybeNumber(bestDexPair?.priceChange?.h24) ?? marketFallback?.price_change_percentage_24h ?? null,
+      marketCapUsd: marketCap,
+      fdvUsd: maybeNumber(bestDexPair?.fdv) ?? marketFallback?.market_cap ?? null,
+      source: bestDexPair ? "dexscreener" : marketFallback ? "coingecko" : "none"
+    },
+    supply: {
+      amountRaw: supplyRaw,
+      decimals,
+      amountUi: supplyUi,
+      amountUiString: supplyUiString
+    },
+    holders,
+    recentTransfers
+  };
+
+  return writeCache(cacheKey, payload, 12000);
+});
+
 app.get("/v1/transactions/live", async (request) => {
   const query = z
     .object({
@@ -1224,15 +1880,17 @@ app.get("/v1/addresses/:address", async (request) => {
     LIMIT 5;
   `;
 
-  const [profile, recentRuns] = await Promise.all([
+  const [profile, recentRuns, runtime] = await Promise.all([
     pool.query(profileQuery, [params.address]),
-    pool.query(recentRunsQuery, [params.address])
+    pool.query(recentRunsQuery, [params.address]),
+    fetchRuntimeAddressSummary(params.address)
   ]);
 
   return {
     address: params.address,
     profile: profile.rowCount ? profile.rows[0] : null,
-    recentVerificationRuns: recentRuns.rows
+    recentVerificationRuns: recentRuns.rows,
+    runtime
   };
 });
 

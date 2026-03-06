@@ -287,6 +287,78 @@ export type AddressDetails = {
     run_status: string;
     created_at: string;
   }>;
+  runtime: {
+    exists: boolean;
+    classification: "token_mint" | "token_account" | "program" | "system_account" | "unknown";
+    ownerProgram: string | null;
+    executable: boolean;
+    lamports: number | null;
+    tokenMint: {
+      decimals: number | null;
+      supplyRaw: string | null;
+      supplyUi: number | null;
+      mintAuthority: string | null;
+      freezeAuthority: string | null;
+      isInitialized: boolean | null;
+    } | null;
+    tokenAccount: {
+      mint: string | null;
+      owner: string | null;
+      state: string | null;
+      amountRaw: string | null;
+      amountUi: number | null;
+      decimals: number | null;
+    } | null;
+    knownToken: {
+      mint: string;
+      symbol: string;
+      name: string;
+      iconUrl: string;
+    } | null;
+  };
+};
+
+export type TokenDetails = {
+  mint: string;
+  runtime: AddressDetails["runtime"];
+  identity: {
+    symbol: string | null;
+    name: string | null;
+    iconUrl: string | null;
+  };
+  market: {
+    priceUsd: number | null;
+    change24hPct: number | null;
+    marketCapUsd: number | null;
+    fdvUsd: number | null;
+    source: "dexscreener" | "coingecko" | "none";
+  };
+  supply: {
+    amountRaw: string | null;
+    decimals: number | null;
+    amountUi: number | null;
+    amountUiString: string | null;
+  };
+  holders: Array<{
+    rank: number;
+    address: string;
+    amountRaw: string;
+    amountUi: number | null;
+    amountUiString: string;
+    pctOfSupply: number | null;
+  }>;
+  recentTransfers: Array<{
+    signature: string;
+    slot: number;
+    blockTime: number | null;
+    success: boolean;
+    action: string;
+    amountRaw: string | null;
+    amountUi: number | null;
+    source: string | null;
+    destination: string | null;
+    authority: string | null;
+  }>;
 };
 
 type FetchJsonOptions = {
@@ -374,4 +446,8 @@ export function getTxDetails(signature: string): Promise<TxDetails> {
 
 export function getAddressDetails(address: string): Promise<AddressDetails> {
   return fetchJson<AddressDetails>(`/v1/addresses/${address}`);
+}
+
+export function getTokenDetails(mint: string): Promise<TokenDetails> {
+  return fetchJson<TokenDetails>(`/v1/tokens/${mint}`);
 }
