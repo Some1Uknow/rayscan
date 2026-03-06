@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getAddressDetails, getProgramDetails, getTokenDetails, getTopTokens } from "../../../lib/api";
+import { getAddressDetails, getTokenDetails, getTopTokens } from "../../../lib/api";
 import { TokenAvatar } from "./token-avatar";
 
 function formatMaybe(value: string | number | null): string {
@@ -72,6 +72,10 @@ function formatTokenAmount(uiAmount: number | null, rawAmount: string | null): s
 }
 
 function mintLogoFallback(mint: string): string {
+  return `https://cdn.jsdelivr.net/gh/solana-labs/token-list@main/assets/mainnet/${mint}/logo.png`;
+}
+
+function mintLogoRawFallback(mint: string): string {
   return `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${mint}/logo.png`;
 }
 
@@ -81,9 +85,8 @@ export default async function AddressPage({
   params: Promise<{ address: string }>;
 }) {
   const { address } = await params;
-  const [details, maybeProgram, topTokens] = await Promise.all([
+  const [details, topTokens] = await Promise.all([
     getAddressDetails(address).catch(() => null),
-    getProgramDetails(address).catch(() => null),
     getTopTokens(6).catch(() => null)
   ]);
 
@@ -102,6 +105,9 @@ export default async function AddressPage({
     marketToken?.iconUrl ??
     resolvedRuntime?.knownToken?.iconUrl ??
     mintLogoFallback(address);
+  const tokenIconFallback = tokenIcon.includes("raw.githubusercontent.com")
+    ? mintLogoFallback(address)
+    : mintLogoRawFallback(address);
 
   if (isTokenMint) {
     const supplyUi = tokenDetails?.supply.amountUi ?? resolvedRuntime?.tokenMint?.supplyUi ?? 0;
@@ -118,7 +124,12 @@ export default async function AddressPage({
       <main id="main-content" className="container page-main">
         <section className="panel token-hero">
           <div className="token-hero-main">
-            <TokenAvatar alt={`${tokenSymbol} icon`} fallbackLabel={tokenSymbol.slice(0, 4)} src={tokenIcon} />
+            <TokenAvatar
+              alt={`${tokenSymbol} icon`}
+              fallbackLabel={tokenSymbol.slice(0, 4)}
+              src={tokenIcon}
+              fallbackSrc={tokenIconFallback}
+            />
             <div>
               <p className="eyebrow">Token Mint</p>
               <h1 className="program-title">{tokenName}</h1>
@@ -261,7 +272,9 @@ export default async function AddressPage({
               <tbody>
                 {topHolders.length === 0 ? (
                   <tr>
-                    <td colSpan={4}>Holder index is syncing live. Try again in a few seconds.</td>
+                    <td colSpan={4}>
+                      Holder data is temporarily unavailable (RPC provider may be rate-limiting this mint).
+                    </td>
                   </tr>
                 ) : (
                   topHolders.map((holder) => (
@@ -303,7 +316,9 @@ export default async function AddressPage({
               <tbody>
                 {recentTransfers.length === 0 ? (
                   <tr>
-                    <td colSpan={7}>Transfer index is syncing for this mint. Refresh in a few seconds.</td>
+                    <td colSpan={7}>
+                      Recent transfer data is temporarily unavailable (RPC provider may be rate-limiting this mint).
+                    </td>
                   </tr>
                 ) : (
                   recentTransfers.map((row) => (
@@ -422,27 +437,10 @@ export default async function AddressPage({
           </dl>
         </article>
         <article className="panel">
-          <h2 className="section-title">Program Signal</h2>
-          {maybeProgram ? (
-            <dl className="detail-list">
-              <div>
-                <dt>Verification Status</dt>
-                <dd>{maybeProgram.verification.status.replaceAll("_", " ")}</dd>
-              </div>
-              <div>
-                <dt>Loader Program</dt>
-                <dd>{maybeProgram.loaderProgramId}</dd>
-              </div>
-              <div>
-                <dt>Program View</dt>
-                <dd>
-                  <Link href={`/program/${address}`}>Open program detail page</Link>
-                </dd>
-              </div>
-            </dl>
-          ) : (
-            <p className="hero-subtitle">This address is not currently indexed as a known program record.</p>
-          )}
+          <h2 className="section-title">Runtime Classification</h2>
+          <p className="hero-subtitle">
+            This account is currently classified as <strong>{addressType}</strong> from live runtime metadata.
+          </p>
         </article>
       </section>
 

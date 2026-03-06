@@ -32,7 +32,7 @@ app.get("/health", async () => {
 });
 
 type SearchMatch = {
-  kind: "program" | "address" | "tx";
+  kind: "address" | "tx";
   id: string;
   title: string;
   subtitle: string;
@@ -331,7 +331,7 @@ type MemoryCacheEntry = {
 const memoryCache = new Map<string, MemoryCacheEntry>();
 
 const RPC_FALLBACK_URLS = [
-  "https://rpc.ankr.com/solana",
+  "https://api.mainnet-beta.solana.com",
   "https://solana.publicnode.com"
 ];
 
@@ -436,8 +436,8 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T | 
   return callSolanaRpcWithTimeout<T>(method, params, 6000);
 }
 
-function lamportsToSol(value: number | null | undefined): number {
-  if (value === null || value === undefined || Number.isNaN(value)) return 0;
+function lamportsToSol(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || Number.isNaN(value)) return null;
   return value / 1_000_000_000;
 }
 
@@ -940,11 +940,11 @@ app.get("/v1/search", async (request) => {
   const exactMatches: SearchMatch[] = [];
   if (exactProgram.rowCount) {
     exactMatches.push({
-      kind: "program",
+      kind: "address",
       id: exactProgram.rows[0].program_id,
       title: exactProgram.rows[0].program_id,
       subtitle: "Program account",
-      href: `/program/${exactProgram.rows[0].program_id}`,
+      href: `/address/${exactProgram.rows[0].program_id}`,
       exact: true,
       confidence: 0.99,
       updatedAt: exactProgram.rows[0].updated_at
@@ -978,11 +978,11 @@ app.get("/v1/search", async (request) => {
   const partialMatches: SearchMatch[] = [
     ...programMatches.rows.map(
       (row): SearchMatch => ({
-        kind: "program",
+        kind: "address",
         id: row.program_id,
         title: row.program_id,
         subtitle: "Program prefix match",
-        href: `/program/${row.program_id}`,
+        href: `/address/${row.program_id}`,
         exact: false,
         confidence: 0.79,
         updatedAt: row.updated_at
@@ -1050,23 +1050,12 @@ app.get("/v1/search", async (request) => {
           exact: false,
           confidence: 0.56,
           updatedAt: null
-        },
-        {
-          kind: "program",
-          id: query.q,
-          title: query.q,
-          subtitle: "Likely program",
-          href: `/program/${query.q}`,
-          exact: false,
-          confidence: 0.52,
-          updatedAt: null
         }
       ].slice(0, query.limit) as SearchMatch[];
     }
   }
 
   const byKind = {
-    program: matches.filter((match) => match.kind === "program").length,
     address: matches.filter((match) => match.kind === "address").length,
     tx: matches.filter((match) => match.kind === "tx").length
   };
@@ -1145,16 +1134,29 @@ app.get("/v1/dashboard/overview", async () => {
 app.get("/v1/network/overview", async () => {
   const cached = readCache<Record<string, unknown>>("network_overview:v1");
   if (cached) return cached;
+  const lastGood = readCache<any>("network_overview:last_good");
+  const supplyPromise = callSolanaRpcWithTimeout<RpcSupplyResult>(
+    "getSupply",
+    [{ commitment: "confirmed", excludeNonCirculatingAccountsList: true }],
+    9000
+  ).then(async (result) => {
+    if (result) return result;
+    return callSolanaRpcWithTimeout<RpcSupplyResult>(
+      "getSupply",
+      [{ commitment: "confirmed", excludeNonCirculatingAccountsList: true }],
+      9000
+    );
+  });
 
   const [supply, epochInfo, slotHeight, blockHeight, txCount, perfSamples, voteAccounts, avgFeeQuery] =
     await Promise.all([
-      callSolanaRpcWithTimeout<RpcSupplyResult>("getSupply", [{ commitment: "confirmed" }], 2000),
-      callSolanaRpcWithTimeout<RpcEpochInfoResult>("getEpochInfo", [{ commitment: "confirmed" }], 2000),
-      callSolanaRpcWithTimeout<number>("getSlot", [{ commitment: "confirmed" }], 2000),
-      callSolanaRpcWithTimeout<number>("getBlockHeight", [{ commitment: "confirmed" }], 2000),
-      callSolanaRpcWithTimeout<number>("getTransactionCount", [{ commitment: "confirmed" }], 2000),
-      callSolanaRpcWithTimeout<RpcPerformanceSample[]>("getRecentPerformanceSamples", [1], 2000),
-      callSolanaRpcWithTimeout<RpcVoteAccountsResult>("getVoteAccounts", [{ commitment: "confirmed" }], 2000),
+      supplyPromise,
+      callSolanaRpcWithTimeout<RpcEpochInfoResult>("getEpochInfo", [{ commitment: "confirmed" }], 6000),
+      callSolanaRpcWithTimeout<number>("getSlot", [{ commitment: "confirmed" }], 6000),
+      callSolanaRpcWithTimeout<number>("getBlockHeight", [{ commitment: "confirmed" }], 6000),
+      callSolanaRpcWithTimeout<number>("getTransactionCount", [{ commitment: "confirmed" }], 6000),
+      callSolanaRpcWithTimeout<RpcPerformanceSample[]>("getRecentPerformanceSamples", [1], 6000),
+      callSolanaRpcWithTimeout<RpcVoteAccountsResult>("getVoteAccounts", [{ commitment: "confirmed" }], 6000),
       pool.query(
         `
           SELECT AVG(fee_lamports)::float8 AS avg_fee_lamports
@@ -1171,22 +1173,54 @@ app.get("/v1/network/overview", async () => {
       ? sample.numNonVoteTransactions / sample.samplePeriodSecs
       : null;
 
-  const totalSupplyLamports = supply?.value.total ?? 0;
-  const circulatingLamports = supply?.value.circulating ?? 0;
-  const nonCirculatingLamports = supply?.value.nonCirculating ?? 0;
-  const circulatingPct = totalSupplyLamports > 0 ? (circulatingLamports / totalSupplyLamports) * 100 : 0;
-  const nonCirculatingPct = totalSupplyLamports > 0 ? (nonCirculatingLamports / totalSupplyLamports) * 100 : 0;
+  const totalSupplyLamports = maybeNumber(supply?.value.total);
+  const circulatingLamports = maybeNumber(supply?.value.circulating);
+  const nonCirculatingLamports = maybeNumber(supply?.value.nonCirculating);
+  const circulatingPct =
+    totalSupplyLamports !== null &&
+    totalSupplyLamports > 0 &&
+    circulatingLamports !== null
+      ? (circulatingLamports / totalSupplyLamports) * 100
+      : null;
+  const nonCirculatingPct =
+    totalSupplyLamports !== null &&
+    totalSupplyLamports > 0 &&
+    nonCirculatingLamports !== null
+      ? (nonCirculatingLamports / totalSupplyLamports) * 100
+      : null;
 
   const currentStakeLamports =
-    voteAccounts?.current.reduce((sum, item) => sum + (Number(item.activatedStake) || 0), 0) ?? 0;
+    voteAccounts !== null
+      ? voteAccounts.current.reduce((sum, item) => sum + (Number(item.activatedStake) || 0), 0)
+      : null;
   const delinquentStakeLamports =
-    voteAccounts?.delinquent.reduce((sum, item) => sum + (Number(item.activatedStake) || 0), 0) ?? 0;
-  const totalStakeLamports = currentStakeLamports + delinquentStakeLamports;
-  const currentStakePct = totalStakeLamports > 0 ? (currentStakeLamports / totalStakeLamports) * 100 : 0;
-  const delinquentStakePct = totalStakeLamports > 0 ? (delinquentStakeLamports / totalStakeLamports) * 100 : 0;
+    voteAccounts !== null
+      ? voteAccounts.delinquent.reduce((sum, item) => sum + (Number(item.activatedStake) || 0), 0)
+      : null;
+  const totalStakeLamports =
+    currentStakeLamports !== null && delinquentStakeLamports !== null
+      ? currentStakeLamports + delinquentStakeLamports
+      : null;
+  const currentStakePct =
+    totalStakeLamports !== null &&
+    totalStakeLamports > 0 &&
+    currentStakeLamports !== null
+      ? (currentStakeLamports / totalStakeLamports) * 100
+      : null;
+  const delinquentStakePct =
+    totalStakeLamports !== null &&
+    totalStakeLamports > 0 &&
+    delinquentStakeLamports !== null
+      ? (delinquentStakeLamports / totalStakeLamports) * 100
+      : null;
 
-  const avgFeeLamportsDb = Number(avgFeeQuery.rows[0]?.avg_fee_lamports ?? 0);
-  const avgFeeLamports = avgFeeLamportsDb > 0 ? avgFeeLamportsDb : 5000;
+  const avgFeeLamportsDb = maybeNumber(avgFeeQuery.rows[0]?.avg_fee_lamports);
+  const avgFeeLamports =
+    avgFeeLamportsDb !== null && avgFeeLamportsDb > 0
+      ? avgFeeLamportsDb
+      : txCount !== null
+        ? 5000
+        : null;
 
   const slotsInEpoch = epochInfo?.slotsInEpoch ?? null;
   const slotIndex = epochInfo?.slotIndex ?? null;
@@ -1247,7 +1281,103 @@ app.get("/v1/network/overview", async () => {
       delinquentPct: delinquentStakePct
     }
   };
-  return writeCache("network_overview:v1", payload, 4000);
+
+  const mergedPayload = {
+    ...payload,
+    supply: {
+      totalSol:
+        payload.supply.totalSol !== null && payload.supply.totalSol > 0
+          ? payload.supply.totalSol
+          : maybeNumber(lastGood?.supply?.totalSol),
+      circulatingSol:
+        payload.supply.circulatingSol !== null && payload.supply.circulatingSol > 0
+          ? payload.supply.circulatingSol
+          : maybeNumber(lastGood?.supply?.circulatingSol),
+      nonCirculatingSol:
+        payload.supply.nonCirculatingSol !== null && payload.supply.nonCirculatingSol > 0
+          ? payload.supply.nonCirculatingSol
+          : maybeNumber(lastGood?.supply?.nonCirculatingSol),
+      circulatingPct:
+        payload.supply.circulatingPct !== null && payload.supply.circulatingPct > 0
+          ? payload.supply.circulatingPct
+          : maybeNumber(lastGood?.supply?.circulatingPct),
+      nonCirculatingPct:
+        payload.supply.nonCirculatingPct !== null && payload.supply.nonCirculatingPct > 0
+          ? payload.supply.nonCirculatingPct
+          : maybeNumber(lastGood?.supply?.nonCirculatingPct)
+    },
+    epoch: {
+      ...payload.epoch,
+      epoch: payload.epoch.epoch ?? lastGood?.epoch?.epoch ?? null,
+      progressPct: payload.epoch.progressPct ?? lastGood?.epoch?.progressPct ?? null,
+      slotRangeStart: payload.epoch.slotRangeStart ?? lastGood?.epoch?.slotRangeStart ?? null,
+      slotRangeEnd: payload.epoch.slotRangeEnd ?? lastGood?.epoch?.slotRangeEnd ?? null,
+      slotIndex: payload.epoch.slotIndex ?? lastGood?.epoch?.slotIndex ?? null,
+      slotsInEpoch: payload.epoch.slotsInEpoch ?? lastGood?.epoch?.slotsInEpoch ?? null,
+      estimatedSecondsRemaining:
+        payload.epoch.estimatedSecondsRemaining ?? lastGood?.epoch?.estimatedSecondsRemaining ?? null
+    },
+    network: {
+      ...payload.network,
+      transactionCount: payload.network.transactionCount ?? lastGood?.network?.transactionCount ?? null,
+      blockHeight: payload.network.blockHeight ?? lastGood?.network?.blockHeight ?? null,
+      slotHeight: payload.network.slotHeight ?? lastGood?.network?.slotHeight ?? null,
+      tps: payload.network.tps ?? lastGood?.network?.tps ?? null,
+      trueTps: payload.network.trueTps ?? lastGood?.network?.trueTps ?? null,
+      avgFeeLamports: payload.network.avgFeeLamports ?? lastGood?.network?.avgFeeLamports ?? null
+    },
+    stake: {
+      totalSol:
+        payload.stake.totalSol !== null && payload.stake.totalSol > 0
+          ? payload.stake.totalSol
+          : maybeNumber(lastGood?.stake?.totalSol),
+      currentSol:
+        payload.stake.currentSol !== null && payload.stake.currentSol > 0
+          ? payload.stake.currentSol
+          : maybeNumber(lastGood?.stake?.currentSol),
+      delinquentSol:
+        payload.stake.delinquentSol !== null && payload.stake.delinquentSol > 0
+          ? payload.stake.delinquentSol
+          : maybeNumber(lastGood?.stake?.delinquentSol),
+      currentPct:
+        payload.stake.currentPct !== null && payload.stake.currentPct > 0
+          ? payload.stake.currentPct
+          : maybeNumber(lastGood?.stake?.currentPct),
+      delinquentPct:
+        payload.stake.delinquentPct !== null && payload.stake.delinquentPct > 0
+          ? payload.stake.delinquentPct
+          : maybeNumber(lastGood?.stake?.delinquentPct)
+    }
+  };
+
+  const hasLiveRpcData =
+    supply !== null ||
+    epochInfo !== null ||
+    txCount !== null ||
+    voteAccounts !== null ||
+    (perfSamples?.length ?? 0) > 0;
+
+  if (!hasLiveRpcData && lastGood) {
+    return writeCache(
+      "network_overview:v1",
+      {
+        ...lastGood,
+        asOf: new Date().toISOString()
+      },
+      4000
+    );
+  }
+
+  if (
+    hasLiveRpcData &&
+    mergedPayload.supply.totalSol !== null &&
+    mergedPayload.supply.totalSol > 0 &&
+    mergedPayload.network.transactionCount !== null
+  ) {
+    writeCache("network_overview:last_good", mergedPayload, 12 * 60 * 60 * 1000);
+  }
+
+  return writeCache("network_overview:v1", mergedPayload, 4000);
 });
 
 app.get("/v1/network/trends", async (request) => {
@@ -1260,9 +1390,10 @@ app.get("/v1/network/trends", async (request) => {
   const cacheKey = `network_trends:${query.limit}`;
   const cached = readCache<Record<string, unknown>>(cacheKey);
   if (cached) return cached;
+  const lastGood = readCache<any>(`network_trends:last_good:${query.limit}`);
 
   const [perfSamples, feeRows] = await Promise.all([
-    callSolanaRpcWithTimeout<RpcPerformanceSample[]>("getRecentPerformanceSamples", [query.limit], 2500),
+    callSolanaRpcWithTimeout<RpcPerformanceSample[]>("getRecentPerformanceSamples", [query.limit], 6000),
     pool.query(
       `
         SELECT
@@ -1307,6 +1438,24 @@ app.get("/v1/network/trends", async (request) => {
     tps,
     fees
   };
+
+  const hasTpsSignal = tps.some((point) => point.tps !== null || point.trueTps !== null);
+  const hasFeeSignal = fees.length > 0;
+
+  if (!hasTpsSignal && !hasFeeSignal && lastGood) {
+    return writeCache(
+      cacheKey,
+      {
+        ...lastGood,
+        asOf: new Date().toISOString()
+      },
+      5000
+    );
+  }
+
+  if (hasTpsSignal || hasFeeSignal) {
+    writeCache(`network_trends:last_good:${query.limit}`, payload, 12 * 60 * 60 * 1000);
+  }
 
   return writeCache(cacheKey, payload, 5000);
 });

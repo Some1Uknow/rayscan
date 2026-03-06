@@ -87,7 +87,7 @@ function formatLamportsOrDash(value: number | null): string {
   return formatLamports(value);
 }
 
-function isLikelyProgramId(value: string): boolean {
+function isLikelyAddress(value: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 }
 
@@ -139,7 +139,7 @@ export default async function TxPage({
       <section className="tx-breadcrumb">
         <Link href="/">Home</Link>
         <ChevronRight size={14} />
-        <Link href="/transactions">Transactions</Link>
+        <Link href="/search">Search</Link>
         <ChevronRight size={14} />
         <span>Detail</span>
       </section>
@@ -348,9 +348,9 @@ export default async function TxPage({
                     <div className="tx-trace-body">
                       <p className="tx-trace-main">
                         Program{" "}
-                        {isLikelyProgramId(instruction.program) ? (
+                        {isLikelyAddress(instruction.program) ? (
                           <Link
-                            href={`/program/${encodeURIComponent(instruction.program)}`}
+                            href={`/address/${encodeURIComponent(instruction.program)}`}
                             className="mono-cell"
                           >
                             {instruction.program}

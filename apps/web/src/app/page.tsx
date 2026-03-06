@@ -1,4 +1,4 @@
-import { Activity, BarChart3, ChartLine, Coins, Database, ShieldCheck, TowerControl, WalletCards } from "lucide-react";
+import { Activity, BarChart3, ChartLine, Coins, TowerControl, WalletCards } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -8,18 +8,8 @@ import {
   getLiveTransactions,
   getNetworkOverview,
   getNetworkTrends,
-  getTopTokens,
-  getProgramsList,
-  getVerificationFeed
+  getTopTokens
 } from "../lib/api";
-
-function statusChipClass(status: string): string {
-  if (status === "verified_reproducible" || status === "succeeded") return "status-chip status-chip-ok";
-  if (status === "source_provided_not_reproducible" || status === "queued" || status === "running") {
-    return "status-chip status-chip-warn";
-  }
-  return "status-chip status-chip-bad";
-}
 
 function compactAddress(value: string): string {
   if (value.length <= 24) return value;
@@ -28,6 +18,13 @@ function compactAddress(value: string): string {
 
 function formatCount(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "0";
+  const n = Number(value);
+  if (Number.isNaN(n)) return String(value);
+  return n.toLocaleString("en-US");
+}
+
+function formatCountOrNa(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return "N/A";
   const n = Number(value);
   if (Number.isNaN(n)) return String(value);
   return n.toLocaleString("en-US");
@@ -169,12 +166,7 @@ function TrendCard({
 }
 
 export default async function HomePage() {
-  const [feed, dashboard, network, trends, liveTx, programs, addresses, topTokens] = await Promise.all([
-    getVerificationFeed("24h").catch(() => ({
-      window: "24h",
-      count: 0,
-      items: []
-    })),
+  const [dashboard, network, trends, liveTx, addresses, topTokens] = await Promise.all([
     getDashboardOverview().catch(() => ({
       counts: {
         programs_count: 0,
@@ -190,11 +182,11 @@ export default async function HomePage() {
       cluster: "mainnet-beta",
       asOf: new Date().toISOString(),
       supply: {
-        totalSol: 0,
-        circulatingSol: 0,
-        nonCirculatingSol: 0,
-        circulatingPct: 0,
-        nonCirculatingPct: 0
+        totalSol: null,
+        circulatingSol: null,
+        nonCirculatingSol: null,
+        circulatingPct: null,
+        nonCirculatingPct: null
       },
       epoch: {
         epoch: null,
@@ -214,11 +206,11 @@ export default async function HomePage() {
         avgFeeLamports: null
       },
       stake: {
-        totalSol: 0,
-        currentSol: 0,
-        delinquentSol: 0,
-        currentPct: 0,
-        delinquentPct: 0
+        totalSol: null,
+        currentSol: null,
+        delinquentSol: null,
+        currentPct: null,
+        delinquentPct: null
       }
     })),
     getNetworkTrends().catch(() => ({
@@ -227,7 +219,6 @@ export default async function HomePage() {
       fees: []
     })),
     getLiveTransactions(10).catch(() => ({ count: 0, items: [] })),
-    getProgramsList(10).catch(() => ({ count: 0, items: [] })),
     getAddressesList(10).catch(() => ({ count: 0, items: [] })),
     getTopTokens(6).catch(() => ({ source: "fallback" as const, count: 0, items: [] }))
   ]);
@@ -236,6 +227,10 @@ export default async function HomePage() {
   const trueTpsSeries = normalizeSeries(trends.tps.map((point) => point.trueTps));
   const feeSeries = normalizeSeries(trends.fees.map((point) => point.avgFeeLamports));
   const solTicker = topTokens.items.find((item) => item.symbol.toUpperCase() === "SOL") ?? null;
+  const indexedTxCount = Number(dashboard.counts.tx_count ?? 0);
+  const indexedAddressCount = Number(dashboard.counts.addresses_count ?? 0);
+  const isIndexColdStart = (Number.isFinite(indexedTxCount) ? indexedTxCount : 0) === 0 &&
+    (Number.isFinite(indexedAddressCount) ? indexedAddressCount : 0) === 0;
 
   return (
     <main id="main-content" className="container page-main">
@@ -243,8 +238,22 @@ export default async function HomePage() {
         <p className="eyebrow">Explorer Snapshot</p>
         <h1 className="program-title">Rayscan</h1>
         <p className="hero-subtitle">
-          General-purpose Solana explorer for transactions, programs, and addresses.
+          General-purpose Solana explorer for transactions, addresses, and token mints.
         </p>
+        <form action="/search" className="hero-search" method="get" role="search">
+          <label className="sr-only" htmlFor="hero-search">
+            Search signature, address, or token mint
+          </label>
+          <input
+            autoComplete="off"
+            id="hero-search"
+            name="q"
+            placeholder="Search signature, address, or token mint…"
+            spellCheck={false}
+            type="text"
+          />
+          <button type="submit">Go</button>
+        </form>
         <div className="market-strip" aria-label="Network market highlights">
           <span className="market-pill">
             <strong>SOL</strong> {formatUsd(solTicker?.priceUsd, 3)}
@@ -257,17 +266,8 @@ export default async function HomePage() {
           </span>
         </div>
         <div className="hero-actions-row">
-          <Link className="ghost-button link-button" href="/transactions">
-            Transactions
-          </Link>
-          <Link className="ghost-button link-button" href="/programs">
-            Programs
-          </Link>
           <Link className="ghost-button link-button" href="/addresses">
             Addresses
-          </Link>
-          <Link className="wallet-button link-button" href="/search">
-            Open Search
           </Link>
         </div>
       </section>
@@ -340,12 +340,12 @@ export default async function HomePage() {
       <section className="stat-grid">
         <article className="panel stat-card">
           <p className="stat-label">Block / Slot Height</p>
-          <p className="stat-value">{formatCount(network.network.blockHeight)}</p>
-          <p className="stat-detail">Slot {formatCount(network.network.slotHeight)}</p>
+          <p className="stat-value">{formatCountOrNa(network.network.blockHeight)}</p>
+          <p className="stat-detail">Slot {formatCountOrNa(network.network.slotHeight)}</p>
         </article>
         <article className="panel stat-card">
           <p className="stat-label">Network Transactions</p>
-          <p className="stat-value">{formatCount(network.network.transactionCount)}</p>
+          <p className="stat-value">{formatCountOrNa(network.network.transactionCount)}</p>
           <p className="stat-detail">Cluster {network.cluster}</p>
         </article>
         <article className="panel stat-card">
@@ -359,7 +359,9 @@ export default async function HomePage() {
           <p className="stat-label">Indexed Coverage</p>
           <p className="stat-value">{formatCount(dashboard.counts.tx_count)} Tx</p>
           <p className="stat-detail">
-            Programs {formatCount(dashboard.counts.programs_count)} • Addresses {formatCount(dashboard.counts.addresses_count)}
+            {isIndexColdStart
+              ? "Indexer not ingesting yet (local DB is still empty)."
+              : `Addresses ${formatCount(dashboard.counts.addresses_count)}`}
           </p>
         </article>
       </section>
@@ -423,187 +425,94 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="grid grid-2">
-        <article className="panel">
-          <div className="section-header">
-            <h2 className="section-title section-title-row">
-              <BarChart3 size={16} /> Latest Transactions
-            </h2>
-            <Link className="network-pill" href="/transactions">
-              View All
-            </Link>
-          </div>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
+      <section className="panel">
+        <div className="section-header">
+          <h2 className="section-title section-title-row">
+            <BarChart3 size={16} /> Latest Transactions
+          </h2>
+          <Link className="network-pill" href="/search">
+            Open Search
+          </Link>
+        </div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Signature</th>
+                <th>Time</th>
+                <th>Block</th>
+                <th>Action</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {liveTx.items.length === 0 ? (
                 <tr>
-                  <th>Signature</th>
-                  <th>Time</th>
-                  <th>Block</th>
-                  <th>Action</th>
-                  <th>Status</th>
+                  <td colSpan={5}>No recent transactions available.</td>
                 </tr>
-              </thead>
-              <tbody>
-                {liveTx.items.length === 0 ? (
-                  <tr>
-                    <td colSpan={5}>No recent transactions available.</td>
+              ) : (
+                liveTx.items.map((tx) => (
+                  <tr key={tx.signature}>
+                    <td>
+                      <Link className="mono-cell" href={`/tx/${tx.signature}`}>
+                        {compactAddress(tx.signature)}
+                      </Link>
+                    </td>
+                    <td>{formatAgo(tx.block_time)}</td>
+                    <td>{tx.slot}</td>
+                    <td>{tx.action}</td>
+                    <td>
+                      <span className={tx.success ? "status-chip status-chip-ok" : "status-chip status-chip-bad"}>
+                        {tx.success ? "succeeded" : "failed"}
+                      </span>
+                    </td>
                   </tr>
-                ) : (
-                  liveTx.items.map((tx) => (
-                    <tr key={tx.signature}>
-                      <td>
-                        <Link className="mono-cell" href={`/tx/${tx.signature}`}>
-                          {compactAddress(tx.signature)}
-                        </Link>
-                      </td>
-                      <td>{formatAgo(tx.block_time)}</td>
-                      <td>{tx.slot}</td>
-                      <td>{tx.action}</td>
-                      <td>
-                        <span className={tx.success ? "status-chip status-chip-ok" : "status-chip status-chip-bad"}>
-                          {tx.success ? "succeeded" : "failed"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="section-header">
-            <h2 className="section-title section-title-row">
-              <Database size={16} /> Latest Programs
-            </h2>
-            <Link className="network-pill" href="/programs">
-              Open Table
-            </Link>
-          </div>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Program</th>
-                  <th>Status</th>
-                  <th>Last Seen Slot</th>
-                </tr>
-              </thead>
-              <tbody>
-                {programs.items.length === 0 ? (
-                  <tr>
-                    <td colSpan={3}>No indexed programs yet.</td>
-                  </tr>
-                ) : (
-                  programs.items.map((program) => {
-                    const status = program.verification_status ?? "unverified";
-                    return (
-                      <tr key={program.program_id}>
-                        <td>
-                          <Link className="mono-cell" href={`/program/${program.program_id}`}>
-                            {compactAddress(program.program_id)}
-                          </Link>
-                        </td>
-                        <td>
-                          <span className={statusChipClass(status)}>{status.replaceAll("_", " ")}</span>
-                        </td>
-                        <td>{program.last_seen_slot ?? "N/A"}</td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </article>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
-      <section className="grid grid-2">
-        <article className="panel">
-          <div className="section-header">
-            <h2 className="section-title section-title-row">
-              <TowerControl size={16} /> Latest Addresses
-            </h2>
-            <Link className="network-pill" href="/addresses">
-              Open Table
-            </Link>
-          </div>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
+      <section className="panel">
+        <div className="section-header">
+          <h2 className="section-title section-title-row">
+            <TowerControl size={16} /> Latest Addresses
+          </h2>
+          <Link className="network-pill" href="/addresses">
+            Open Table
+          </Link>
+        </div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Address</th>
+                <th>Last Seen Slot</th>
+                <th>Runs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {addresses.items.length === 0 ? (
                 <tr>
-                  <th>Address</th>
-                  <th>Last Seen Slot</th>
-                  <th>Runs</th>
+                  <td colSpan={3}>No address profiles indexed yet.</td>
                 </tr>
-              </thead>
-              <tbody>
-                {addresses.items.length === 0 ? (
-                  <tr>
-                    <td colSpan={3}>No address profiles indexed yet.</td>
+              ) : (
+                addresses.items.map((address) => (
+                  <tr key={address.wallet_address}>
+                    <td>
+                      <Link className="mono-cell" href={`/address/${address.wallet_address}`}>
+                        {compactAddress(address.wallet_address)}
+                      </Link>
+                    </td>
+                    <td>{address.last_seen_slot ?? "N/A"}</td>
+                    <td>{address.verifier_run_count}</td>
                   </tr>
-                ) : (
-                  addresses.items.map((address) => (
-                    <tr key={address.wallet_address}>
-                      <td>
-                        <Link className="mono-cell" href={`/address/${address.wallet_address}`}>
-                          {compactAddress(address.wallet_address)}
-                        </Link>
-                      </td>
-                      <td>{address.last_seen_slot ?? "N/A"}</td>
-                      <td>{address.verifier_run_count}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article className="panel" id="verification-feed">
-          <div className="section-header">
-            <h2 className="section-title section-title-row">
-              <ShieldCheck size={16} /> Program Verification Updates (24h)
-            </h2>
-            <span className="network-pill">{feed.count} rows</span>
-          </div>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Program</th>
-                  <th>Status</th>
-                  <th>Checked</th>
-                </tr>
-              </thead>
-              <tbody>
-                {feed.items.length === 0 ? (
-                  <tr>
-                    <td colSpan={3}>No verification data in current window.</td>
-                  </tr>
-                ) : (
-                  feed.items.slice(0, 10).map((item) => (
-                    <tr key={`${item.program_id}-${item.last_checked_at}`}>
-                      <td>
-                        <Link className="mono-cell" href={`/program/${item.program_id}`}>
-                          {compactAddress(item.program_id)}
-                        </Link>
-                      </td>
-                      <td>
-                        <span className={statusChipClass(item.verification_status)}>
-                          {item.verification_status.replaceAll("_", " ")}
-                        </span>
-                      </td>
-                      <td>{item.last_checked_at}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </article>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   );

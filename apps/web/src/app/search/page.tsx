@@ -2,11 +2,18 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { searchExplorer } from "../../lib/api";
 
-function classifyFallback(q: string): "tx" | "address_or_program" | "unknown" {
+function classifyFallback(q: string): "tx" | "address_or_mint" | "unknown" {
   if (!q) return "unknown";
   if (q.length >= 80) return "tx";
-  if (q.length >= 32) return "address_or_program";
+  if (q.length >= 32) return "address_or_mint";
   return "unknown";
+}
+
+function normalizeExplorerHref(href: string): string {
+  if (href.startsWith("/program/")) {
+    return href.replace("/program/", "/address/");
+  }
+  return href;
 }
 
 function looksLikeTxSignature(value: string): boolean {
@@ -32,17 +39,11 @@ export default async function SearchPage({
     <main id="main-content" className="container page-main">
       <section className="panel hero-block">
         <p className="eyebrow">Search</p>
-        <h1 className="hero-title">Find transactions, addresses, and programs.</h1>
+        <h1 className="hero-title">Find transactions, addresses, and token mints.</h1>
         <p className="hero-subtitle">
           Paste a signature or address to jump directly into indexed explorer routes.
         </p>
         <div className="hero-actions-row">
-          <Link className="ghost-button link-button" href="/transactions">
-            Transactions
-          </Link>
-          <Link className="ghost-button link-button" href="/programs">
-            Programs
-          </Link>
           <Link className="ghost-button link-button" href="/addresses">
             Addresses
           </Link>
@@ -65,8 +66,8 @@ export default async function SearchPage({
               <p className="feature-copy">
                 {result.bestMatch.subtitle} • confidence {(result.bestMatch.confidence * 100).toFixed(0)}%
               </p>
-              <Link className="wallet-button link-button" href={result.bestMatch.href}>
-                Open {result.bestMatch.kind} page
+              <Link className="wallet-button link-button" href={normalizeExplorerHref(result.bestMatch.href)}>
+                Open detail page
               </Link>
             </article>
 
@@ -91,7 +92,7 @@ export default async function SearchPage({
                       <td>{match.exact ? "exact" : "prefix"}</td>
                       <td>{(match.confidence * 100).toFixed(0)}%</td>
                       <td>
-                        <Link className="ghost-button link-button" href={match.href}>
+                        <Link className="ghost-button link-button" href={normalizeExplorerHref(match.href)}>
                           Open
                         </Link>
                       </td>
@@ -106,22 +107,13 @@ export default async function SearchPage({
             <p className="hero-subtitle">
               No indexed matches yet for <strong>{q}</strong>. You can still open fallback routes.
             </p>
-            <div className="grid grid-2">
-              <article className="panel">
-                <h3 className="feature-title">Open As Program</h3>
-                <p className="feature-copy">{q}</p>
-                <Link className="ghost-button link-button" href={`/program/${q}`}>
-                  Go to Program Page
-                </Link>
-              </article>
-              <article className="panel">
-                <h3 className="feature-title">Open As Address</h3>
-                <p className="feature-copy">{q}</p>
-                <Link className="ghost-button link-button" href={`/address/${q}`}>
-                  Go to Address Page
-                </Link>
-              </article>
-            </div>
+            <article className="panel">
+              <h3 className="feature-title">Open As Address / Mint</h3>
+              <p className="feature-copy">{q}</p>
+              <Link className="ghost-button link-button" href={`/address/${q}`}>
+                Go to Address Page
+              </Link>
+            </article>
             <span className="network-pill">fallback: {fallbackKind.replaceAll("_", " ")}</span>
           </div>
         )}

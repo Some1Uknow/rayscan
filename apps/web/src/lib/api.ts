@@ -1,79 +1,14 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
-export type ProgramDetails = {
-  programId: string;
-  loaderProgramId: string;
-  programdataAddress: string | null;
-  upgradeAuthority: string | null;
-  isUpgradeable: boolean;
-  deploySlot: number | null;
-  lastUpgradeSlot: number | null;
-  lastSeenSlot: number | null;
-  verification: {
-    status:
-      | "verified_reproducible"
-      | "source_provided_not_reproducible"
-      | "unverified"
-      | "verification_failed";
-    checkedAt: string | null;
-    sourceRepoUrl: string | null;
-    sourceCommit: string | null;
-    diffSummary: string | null;
-  };
-};
-
-export type VerificationDetails = {
-  programId: string;
-  summary: {
-    verification_status: string;
-    source_repo_url: string | null;
-    source_commit: string | null;
-    source_subdir: string | null;
-    build_image: string | null;
-    verifier_version: string | null;
-    expected_program_hash: string | null;
-    onchain_program_hash: string | null;
-    diff_summary: string | null;
-    verified_at: string | null;
-    last_checked_at: string | null;
-  } | null;
-  runs: Array<{
-    run_id: number;
-    triggered_by: string;
-    run_status: string;
-    queue_latency_ms: number | null;
-    duration_ms: number | null;
-    started_at: string | null;
-    finished_at: string | null;
-    error_code: string | null;
-    error_message: string | null;
-    created_at: string;
-  }>;
-};
-
-export type VerificationFeedResponse = {
-  window: string;
-  count: number;
-  items: Array<{
-    program_id: string;
-    verification_status: string;
-    source_repo_url: string | null;
-    source_commit: string | null;
-    last_checked_at: string;
-    last_upgrade_slot: string | null;
-  }>;
-};
-
 export type ExplorerSearchResponse = {
   query: string;
   count: number;
   byKind: {
-    program: number;
     address: number;
     tx: number;
   };
   bestMatch: {
-    kind: "program" | "address" | "tx";
+    kind: "address" | "tx";
     id: string;
     title: string;
     subtitle: string;
@@ -83,7 +18,7 @@ export type ExplorerSearchResponse = {
     updatedAt: string | null;
   } | null;
   matches: Array<{
-    kind: "program" | "address" | "tx";
+    kind: "address" | "tx";
     id: string;
     title: string;
     subtitle: string;
@@ -127,11 +62,11 @@ export type NetworkOverviewResponse = {
   cluster: string;
   asOf: string;
   supply: {
-    totalSol: number;
-    circulatingSol: number;
-    nonCirculatingSol: number;
-    circulatingPct: number;
-    nonCirculatingPct: number;
+    totalSol: number | null;
+    circulatingSol: number | null;
+    nonCirculatingSol: number | null;
+    circulatingPct: number | null;
+    nonCirculatingPct: number | null;
   };
   epoch: {
     epoch: number | null;
@@ -151,11 +86,11 @@ export type NetworkOverviewResponse = {
     avgFeeLamports: number | null;
   };
   stake: {
-    totalSol: number;
-    currentSol: number;
-    delinquentSol: number;
-    currentPct: number;
-    delinquentPct: number;
+    totalSol: number | null;
+    currentSol: number | null;
+    delinquentSol: number | null;
+    currentPct: number | null;
+    delinquentPct: number | null;
   };
 };
 
@@ -213,19 +148,6 @@ export type TransactionsListResponse = {
     priority_fee_lamports: string | number | null;
     source: string;
     created_at: string;
-  }>;
-};
-
-export type ProgramsListResponse = {
-  count: number;
-  items: Array<{
-    program_id: string;
-    last_seen_slot: string | number | null;
-    last_upgrade_slot: string | number | null;
-    is_upgradeable: boolean;
-    verification_status: string | null;
-    last_checked_at: string | null;
-    source_repo_url: string | null;
   }>;
 };
 
@@ -380,18 +302,6 @@ async function fetchJson<T>(path: string, options: FetchJsonOptions = {}): Promi
   return (await res.json()) as T;
 }
 
-export function getProgramDetails(programId: string): Promise<ProgramDetails> {
-  return fetchJson<ProgramDetails>(`/v1/programs/${programId}`);
-}
-
-export function getProgramVerification(programId: string): Promise<VerificationDetails> {
-  return fetchJson<VerificationDetails>(`/v1/programs/${programId}/verification`);
-}
-
-export function getVerificationFeed(window: "1h" | "24h" | "7d" = "24h"): Promise<VerificationFeedResponse> {
-  return fetchJson<VerificationFeedResponse>(`/v1/programs/verification-feed?window=${window}`);
-}
-
 export function searchExplorer(query: string, limit = 8): Promise<ExplorerSearchResponse> {
   return fetchJson<ExplorerSearchResponse>(
     `/v1/search?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`
@@ -424,12 +334,6 @@ export function getTopTokens(limit = 6, revalidate = 15): Promise<TopTokensRespo
 
 export function getTransactionsList(limit = 20, revalidate = 5): Promise<TransactionsListResponse> {
   return fetchJson<TransactionsListResponse>(`/v1/transactions?limit=${encodeURIComponent(String(limit))}`, {
-    revalidate
-  });
-}
-
-export function getProgramsList(limit = 20, revalidate = 10): Promise<ProgramsListResponse> {
-  return fetchJson<ProgramsListResponse>(`/v1/programs?limit=${encodeURIComponent(String(limit))}`, {
     revalidate
   });
 }
