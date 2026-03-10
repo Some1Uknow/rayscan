@@ -85,6 +85,10 @@ CREATE TABLE IF NOT EXISTS tx_index (
   fee_lamports BIGINT NOT NULL DEFAULT 0,
   compute_units BIGINT,
   priority_fee_lamports BIGINT,
+  commitment TEXT NOT NULL DEFAULT 'processed',
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_status_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_observed_slot BIGINT,
   source TEXT NOT NULL DEFAULT 'stream',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -98,8 +102,44 @@ CREATE TABLE IF NOT EXISTS wallet_profiles (
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
+ALTER TABLE IF EXISTS tx_index ADD COLUMN IF NOT EXISTS commitment TEXT;
+ALTER TABLE IF EXISTS tx_index ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tx_index ADD COLUMN IF NOT EXISTS last_status_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tx_index ADD COLUMN IF NOT EXISTS last_observed_slot BIGINT;
+
+UPDATE tx_index
+SET
+  commitment = COALESCE(commitment, 'processed'),
+  first_seen_at = COALESCE(first_seen_at, created_at, NOW()),
+  last_status_at = COALESCE(last_status_at, created_at, NOW()),
+  last_observed_slot = COALESCE(last_observed_slot, slot);
+
+ALTER TABLE IF EXISTS tx_index ALTER COLUMN commitment SET DEFAULT 'processed';
+ALTER TABLE IF EXISTS tx_index ALTER COLUMN commitment SET NOT NULL;
+ALTER TABLE IF EXISTS tx_index ALTER COLUMN first_seen_at SET DEFAULT NOW();
+ALTER TABLE IF EXISTS tx_index ALTER COLUMN first_seen_at SET NOT NULL;
+ALTER TABLE IF EXISTS tx_index ALTER COLUMN last_status_at SET DEFAULT NOW();
+ALTER TABLE IF EXISTS tx_index ALTER COLUMN last_status_at SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'tx_index_commitment_check'
+  ) THEN
+    ALTER TABLE tx_index
+    ADD CONSTRAINT tx_index_commitment_check
+    CHECK (commitment IN ('processed', 'confirmed', 'finalized'));
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_tx_index_slot ON tx_index(slot DESC);
 CREATE INDEX IF NOT EXISTS idx_tx_index_created_at ON tx_index(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tx_index_commitment_created_at
+  ON tx_index(commitment, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tx_index_last_status_at
+  ON tx_index(last_status_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pools_pair ON pools(base_mint, quote_mint);
 CREATE INDEX IF NOT EXISTS idx_wallet_profiles_last_seen_slot
   ON wallet_profiles(last_seen_slot DESC NULLS LAST, updated_at DESC);

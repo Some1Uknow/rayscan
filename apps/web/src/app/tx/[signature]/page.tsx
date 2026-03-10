@@ -91,6 +91,19 @@ function isLikelyAddress(value: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 }
 
+function classifyLogLine(line: string): {
+  tone: "success" | "error" | "invoke" | "compute" | "log" | "neutral";
+  label: string;
+} {
+  const lower = line.toLowerCase();
+  if (lower.includes("success")) return { tone: "success", label: "Success" };
+  if (lower.includes("failed") || lower.includes("error")) return { tone: "error", label: "Error" };
+  if (lower.includes("invoke")) return { tone: "invoke", label: "Invoke" };
+  if (lower.includes("consumed") || lower.includes("compute")) return { tone: "compute", label: "Compute" };
+  if (lower.includes("program log:")) return { tone: "log", label: "Log" };
+  return { tone: "neutral", label: "Trace" };
+}
+
 export default async function TxPage({
   params
 }: {
@@ -133,6 +146,17 @@ export default async function TxPage({
       ? Math.max(1, Math.min(100, Math.round((computeUnits / computeLimit) * 100)))
       : 0;
   const primarySigner = tx.signers[0] ?? null;
+  const logSummary = tx.logMessages.reduce(
+    (acc, line) => {
+      const { tone } = classifyLogLine(line);
+      acc.total += 1;
+      if (tone === "invoke") acc.invokes += 1;
+      if (tone === "success") acc.successes += 1;
+      if (tone === "error") acc.errors += 1;
+      return acc;
+    },
+    { total: 0, invokes: 0, successes: 0, errors: 0 }
+  );
 
   return (
     <main id="main-content" className="container page-main tx-page-main">
@@ -378,9 +402,28 @@ export default async function TxPage({
             {tx.logMessages.length === 0 ? (
               <p className="hero-subtitle">No log messages were returned for this signature.</p>
             ) : (
-              <pre className="tx-log-box tx-log-box-large">
-                {tx.logMessages.map((line, index) => `${index + 1}. ${line}`).join("\n")}
-              </pre>
+              <>
+                <div className="tx-log-summary" aria-label="Program log summary">
+                  <span className="network-pill">{logSummary.total} total</span>
+                  <span className="tx-log-summary-pill tx-log-summary-pill-invoke">{logSummary.invokes} invokes</span>
+                  <span className="tx-log-summary-pill tx-log-summary-pill-success">
+                    {logSummary.successes} success
+                  </span>
+                  <span className="tx-log-summary-pill tx-log-summary-pill-error">{logSummary.errors} errors</span>
+                </div>
+                <ol className="tx-log-list">
+                  {tx.logMessages.map((line, index) => {
+                    const logMeta = classifyLogLine(line);
+                    return (
+                      <li key={`${index}-${line}`} className={`tx-log-row tx-log-row-${logMeta.tone}`}>
+                        <span className="tx-log-index">{index + 1}</span>
+                        <span className={`tx-log-label tx-log-label-${logMeta.tone}`}>{logMeta.label}</span>
+                        <code className="tx-log-line">{line}</code>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </>
             )}
           </article>
         </div>

@@ -1,4 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+import { getServerApiUrl } from "./env";
+
+const API_URL = getServerApiUrl();
 
 export type ExplorerSearchResponse = {
   query: string;
@@ -148,17 +150,6 @@ export type TransactionsListResponse = {
     priority_fee_lamports: string | number | null;
     source: string;
     created_at: string;
-  }>;
-};
-
-export type AddressesListResponse = {
-  count: number;
-  items: Array<{
-    wallet_address: string;
-    first_seen_slot: string | number | null;
-    last_seen_slot: string | number | null;
-    updated_at: string;
-    verifier_run_count: string | number;
   }>;
 };
 
@@ -334,12 +325,6 @@ export function getTopTokens(limit = 6, revalidate = 15): Promise<TopTokensRespo
 
 export function getTransactionsList(limit = 20, revalidate = 5): Promise<TransactionsListResponse> {
   return fetchJson<TransactionsListResponse>(`/v1/transactions?limit=${encodeURIComponent(String(limit))}`, {
-    revalidate
-  });
-}
-
-export function getAddressesList(limit = 20, revalidate = 10): Promise<AddressesListResponse> {
-  return fetchJson<AddressesListResponse>(`/v1/addresses?limit=${encodeURIComponent(String(limit))}`, {
     revalidate
   });
 }

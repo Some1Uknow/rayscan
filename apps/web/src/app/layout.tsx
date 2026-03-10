@@ -1,14 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { getSiteUrl, getSolanaCluster } from "../lib/env";
 import "./globals.css";
+
+const siteUrl = getSiteUrl();
 
 export const metadata: Metadata = {
   title: "Rayscan",
-  description: "General-purpose Solana explorer with Raydium-first depth"
+  description: "General-purpose Solana explorer with Raydium-first depth",
+  metadataBase: siteUrl ? new URL(siteUrl) : undefined
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const cluster = getSolanaCluster();
+
   return (
     <html lang="en">
       <body>
@@ -25,7 +31,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </Link>
 
             <div className="header-actions">
-              <span className="network-pill">Mainnet</span>
+              <span className="network-pill">{cluster}</span>
             </div>
           </div>
         </header>

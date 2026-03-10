@@ -317,8 +317,10 @@ export default async function AddressPage({
                     </td>
                   </tr>
                 ) : (
-                  recentTransfers.map((row) => (
-                    <tr key={`${row.signature}-${row.slot}-${row.action}-${row.source ?? "na"}`}>
+                  recentTransfers.map((row, index) => (
+                    <tr
+                      key={`${row.signature}-${row.slot}-${row.action}-${row.source ?? "na"}-${row.destination ?? "na"}-${row.amountRaw ?? "na"}-${index}`}
+                    >
                       <td>
                         <Link className="mono-cell" href={`/tx/${row.signature}`}>
                           {formatCompactAddress(row.signature)}

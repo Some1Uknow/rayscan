@@ -43,11 +43,6 @@ export default async function SearchPage({
         <p className="hero-subtitle">
           Paste a signature or address to jump directly into indexed explorer routes.
         </p>
-        <div className="hero-actions-row">
-          <Link className="ghost-button link-button" href="/addresses">
-            Addresses
-          </Link>
-        </div>
       </section>
 
       <section className="panel">

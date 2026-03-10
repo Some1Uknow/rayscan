@@ -8,7 +8,7 @@ General-purpose Solana explorer blueprint with Raydium-first depth, optimized fo
 ## Stack
 - Frontend: Next.js + `@solana/client` + `@solana/react-hooks`
 - Solana SDK: `@solana/kit` (with `@solana/web3-compat` only at boundaries)
-- Ingestion: Yellowstone gRPC + RPC backfill
+- Ingestion: Helius/Solana WebSocket stream + RPC reconciliation
 - Data: ClickHouse + Postgres + Redis
 - API: REST + GraphQL + SSE
 
@@ -36,5 +36,6 @@ General-purpose Solana explorer blueprint with Raydium-first depth, optimized fo
 
 ## Dev Commands
 - `pnpm api:dev`
+- `pnpm indexer:dev`
 - `pnpm web:dev`
 - `pnpm verifier:dev`

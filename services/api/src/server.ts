@@ -4,7 +4,10 @@ import { z } from "zod";
 import { closeDb, pool } from "./db.js";
 import { env } from "./env.js";
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: true,
+  trustProxy: env.API_TRUST_PROXY
+});
 
 const ALLOWED_CORS_ORIGINS = new Set(
   env.API_CORS_ORIGINS
@@ -36,6 +39,14 @@ app.setErrorHandler((error, request, reply) => {
     error: "internal_error",
     message: "Unexpected server error"
   });
+});
+
+app.addHook("onSend", async (_request, reply, payload) => {
+  reply.header("x-content-type-options", "nosniff");
+  reply.header("x-frame-options", "DENY");
+  reply.header("referrer-policy", "same-origin");
+  reply.header("cross-origin-resource-policy", "same-site");
+  return payload;
 });
 
 app.get("/health", async () => {
@@ -395,13 +406,12 @@ type MemoryCacheEntry = {
 
 const memoryCache = new Map<string, MemoryCacheEntry>();
 
-const RPC_FALLBACK_URLS = [
-  "https://api.mainnet-beta.solana.com",
-  "https://solana.publicnode.com"
-];
-
 function rpcCandidates(): string[] {
-  const ordered = [env.SOLANA_RPC_URL, ...RPC_FALLBACK_URLS];
+  const fallbackUrls = env.SOLANA_RPC_FALLBACK_URLS
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  const ordered = [env.SOLANA_RPC_URL, ...fallbackUrls];
   return Array.from(new Set(ordered));
 }
 
@@ -1291,9 +1301,9 @@ app.get("/v1/network/overview", async () => {
       callSolanaRpcWithTimeout<RpcVoteAccountsResult>("getVoteAccounts", [{ commitment: "confirmed" }], 6000),
       pool.query(
         `
-          SELECT AVG(fee_lamports)::float8 AS avg_fee_lamports
+          SELECT AVG(NULLIF(fee_lamports, 0))::float8 AS avg_fee_lamports
           FROM tx_index
-          WHERE created_at >= NOW() - INTERVAL '30 minutes';
+          WHERE COALESCE(last_status_at, created_at) >= NOW() - INTERVAL '30 minutes';
         `
       )
     ]);
@@ -1379,7 +1389,7 @@ app.get("/v1/network/overview", async () => {
       : null;
 
   const payload = {
-    cluster: "mainnet-beta",
+    cluster: env.SOLANA_CLUSTER,
     asOf: new Date().toISOString(),
     supply: {
       totalSol: lamportsToSol(totalSupplyLamports),
@@ -1499,10 +1509,11 @@ app.get("/v1/network/trends", async (request) => {
     pool.query(
       `
         SELECT
-          EXTRACT(EPOCH FROM date_trunc('minute', created_at))::bigint AS bucket_ts,
-          AVG(fee_lamports)::float8 AS avg_fee_lamports
+          EXTRACT(EPOCH FROM date_trunc('minute', COALESCE(last_status_at, created_at)))::bigint AS bucket_ts,
+          AVG(NULLIF(fee_lamports, 0))::float8 AS avg_fee_lamports
         FROM tx_index
-        WHERE created_at >= NOW() - INTERVAL '90 minutes'
+        WHERE COALESCE(last_status_at, created_at) >= NOW() - INTERVAL '90 minutes'
+          AND fee_lamports > 0
         GROUP BY 1
         ORDER BY 1 DESC
         LIMIT $1;
@@ -1851,16 +1862,23 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
   return writeCache(cacheKey, payload, 30000);
 });
 
-app.get("/v1/transactions/live", async (request) => {
-  const query = z
-    .object({
-      limit: z.coerce.number().int().min(1).max(20).default(10)
-    })
-    .parse(request.query);
+type LiveTransactionsPayload = {
+  count: number;
+  items: Array<{
+    signature: string;
+    slot: string | number;
+    block_time: string | number | null;
+    success: boolean;
+    fee_lamports: string | number;
+    action: string;
+    source: string;
+  }>;
+};
 
-  const cacheKey = `transactions:live:${query.limit}`;
+async function getLiveTransactionsPayload(limit: number): Promise<LiveTransactionsPayload> {
+  const cacheKey = `transactions:live:${limit}`;
   const cached = readCache<Record<string, unknown>>(cacheKey);
-  if (cached) return cached;
+  if (cached) return cached as LiveTransactionsPayload;
 
   const local = await pool.query(
     `
@@ -1876,7 +1894,7 @@ app.get("/v1/transactions/live", async (request) => {
       ORDER BY slot DESC, created_at DESC
       LIMIT $1;
     `,
-    [query.limit]
+    [limit]
   );
 
   if ((local.rowCount ?? local.rows.length) > 0) {
@@ -1916,7 +1934,7 @@ app.get("/v1/transactions/live", async (request) => {
         ])
       : null;
 
-  let signatures = block?.signatures?.slice(0, query.limit) ?? [];
+  let signatures = block?.signatures?.slice(0, limit) ?? [];
   if (signatures.length === 0) {
     const fallback = await callSolanaRpc<
       Array<{
@@ -1925,11 +1943,11 @@ app.get("/v1/transactions/live", async (request) => {
     >("getSignaturesForAddress", [
       "11111111111111111111111111111111",
       {
-        limit: query.limit,
+        limit,
         commitment: "confirmed"
       }
     ]);
-    signatures = fallback?.map((item) => item.signature).slice(0, query.limit) ?? [];
+    signatures = fallback?.map((item) => item.signature).slice(0, limit) ?? [];
   }
 
   if (signatures.length === 0) {
@@ -1961,6 +1979,81 @@ app.get("/v1/transactions/live", async (request) => {
     items
   };
   return writeCache(cacheKey, payload, 2000);
+}
+
+app.get("/v1/transactions/live", async (request) => {
+  const query = z
+    .object({
+      limit: z.coerce.number().int().min(1).max(20).default(10)
+    })
+    .parse(request.query);
+
+  return getLiveTransactionsPayload(query.limit);
+});
+
+app.get("/v1/transactions/live/stream", async (request, reply) => {
+  const query = z
+    .object({
+      limit: z.coerce.number().int().min(1).max(20).default(10),
+      interval_ms: z.coerce.number().int().min(1000).max(10000).default(2000)
+    })
+    .parse(request.query);
+
+  const origin = typeof request.headers.origin === "string" ? request.headers.origin : null;
+  const corsOrigin = origin && ALLOWED_CORS_ORIGINS.has(origin) ? origin : null;
+
+  reply.hijack();
+  reply.raw.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+    ...(corsOrigin
+      ? {
+          "access-control-allow-origin": corsOrigin,
+          vary: "Origin"
+        }
+      : {})
+  });
+
+  let closed = false;
+  let lastFingerprint = "";
+
+  const sendSnapshot = async () => {
+    if (closed) return;
+
+    try {
+      const payload = await getLiveTransactionsPayload(query.limit);
+      const fingerprint = payload.items
+        .map((item) => `${item.signature}:${item.slot}:${item.source}:${item.success ? "1" : "0"}`)
+        .join("|");
+
+      if (fingerprint === lastFingerprint) return;
+      lastFingerprint = fingerprint;
+      reply.raw.write(`event: snapshot\n`);
+      reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+    } catch (error) {
+      request.log.error(error, "failed to stream live transactions");
+      reply.raw.write(`event: stream_error\n`);
+      reply.raw.write(
+        `data: ${JSON.stringify({ message: "Unable to refresh live transaction feed right now." })}\n\n`
+      );
+    }
+  };
+
+  reply.raw.write(`retry: ${query.interval_ms}\n\n`);
+
+  const timer = setInterval(() => {
+    void sendSnapshot();
+  }, query.interval_ms);
+
+  request.raw.on("close", () => {
+    closed = true;
+    clearInterval(timer);
+    reply.raw.end();
+  });
+
+  await sendSnapshot();
 });
 
 app.get("/v1/transactions", async (request) => {
@@ -2311,4 +2404,4 @@ const shutdown = async () => {
 process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
-await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
+await app.listen({ port: env.API_PORT, host: env.API_HOST });

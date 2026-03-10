@@ -1,9 +1,10 @@
-import { Activity, BarChart3, ChartLine, Coins, TowerControl, WalletCards } from "lucide-react";
+import { Activity, ChartLine, Coins, WalletCards } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { getSolanaCluster } from "../lib/env";
+import { LatestTransactionsFeed } from "./latest-transactions-feed";
 import {
-  getAddressesList,
   getDashboardOverview,
   getLiveTransactions,
   getNetworkOverview,
@@ -166,7 +167,8 @@ function TrendCard({
 }
 
 export default async function HomePage() {
-  const [dashboard, network, trends, liveTx, addresses, topTokens] = await Promise.all([
+  const solanaCluster = getSolanaCluster();
+  const [dashboard, network, trends, liveTx, topTokens] = await Promise.all([
     getDashboardOverview().catch(() => ({
       counts: {
         programs_count: 0,
@@ -179,7 +181,7 @@ export default async function HomePage() {
       recentPrograms: []
     })),
     getNetworkOverview().catch(() => ({
-      cluster: "mainnet-beta",
+      cluster: solanaCluster,
       asOf: new Date().toISOString(),
       supply: {
         totalSol: null,
@@ -219,7 +221,6 @@ export default async function HomePage() {
       fees: []
     })),
     getLiveTransactions(10).catch(() => ({ count: 0, items: [] })),
-    getAddressesList(10).catch(() => ({ count: 0, items: [] })),
     getTopTokens(6).catch(() => ({ source: "fallback" as const, count: 0, items: [] }))
   ]);
 
@@ -262,13 +263,9 @@ export default async function HomePage() {
             24h {formatSignedPercent(solTicker?.change24hPct)}
           </span>
           <span className="market-pill">
-            Avg Fee {network.network.avgFeeLamports !== null ? network.network.avgFeeLamports.toFixed(2) : "N/A"} lamports
+            30m Avg Fee{" "}
+            {network.network.avgFeeLamports !== null ? network.network.avgFeeLamports.toFixed(2) : "N/A"} lamports
           </span>
-        </div>
-        <div className="hero-actions-row">
-          <Link className="ghost-button link-button" href="/addresses">
-            Addresses
-          </Link>
         </div>
       </section>
 
@@ -300,13 +297,13 @@ export default async function HomePage() {
           </p>
         </article>
         <article className="panel stat-card">
-          <p className="stat-label">Avg Fee (Lamports)</p>
+          <p className="stat-label">30m Avg Fee (Lamports)</p>
           <p className="stat-value">
             {network.network.avgFeeLamports !== null
               ? network.network.avgFeeLamports.toLocaleString("en-US", { maximumFractionDigits: 2 })
               : "N/A"}
           </p>
-          <p className="stat-detail">Derived from last 30m indexed data or RPC fees.</p>
+          <p className="stat-detail">Rolling 30 minute average from enriched indexed fees or RPC fallback.</p>
         </article>
       </section>
 
@@ -328,8 +325,8 @@ export default async function HomePage() {
           lineTone="purple"
         />
         <TrendCard
-          title="Average Fee"
-          subtitle="Lamports"
+          title="Recent Fee Trend"
+          subtitle="Latest 1m bucket"
           icon={Coins}
           values={feeSeries}
           formatter={(value) => value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
@@ -425,95 +422,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="panel">
-        <div className="section-header">
-          <h2 className="section-title section-title-row">
-            <BarChart3 size={16} /> Latest Transactions
-          </h2>
-          <Link className="network-pill" href="/search">
-            Open Search
-          </Link>
-        </div>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Signature</th>
-                <th>Time</th>
-                <th>Block</th>
-                <th>Action</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {liveTx.items.length === 0 ? (
-                <tr>
-                  <td colSpan={5}>No recent transactions available.</td>
-                </tr>
-              ) : (
-                liveTx.items.map((tx) => (
-                  <tr key={tx.signature}>
-                    <td>
-                      <Link className="mono-cell" href={`/tx/${tx.signature}`}>
-                        {compactAddress(tx.signature)}
-                      </Link>
-                    </td>
-                    <td>{formatAgo(tx.block_time)}</td>
-                    <td>{tx.slot}</td>
-                    <td>{tx.action}</td>
-                    <td>
-                      <span className={tx.success ? "status-chip status-chip-ok" : "status-chip status-chip-bad"}>
-                        {tx.success ? "succeeded" : "failed"}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="section-header">
-          <h2 className="section-title section-title-row">
-            <TowerControl size={16} /> Latest Addresses
-          </h2>
-          <Link className="network-pill" href="/addresses">
-            Open Table
-          </Link>
-        </div>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Address</th>
-                <th>Last Seen Slot</th>
-                <th>Runs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {addresses.items.length === 0 ? (
-                <tr>
-                  <td colSpan={3}>No address profiles indexed yet.</td>
-                </tr>
-              ) : (
-                addresses.items.map((address) => (
-                  <tr key={address.wallet_address}>
-                    <td>
-                      <Link className="mono-cell" href={`/address/${address.wallet_address}`}>
-                        {compactAddress(address.wallet_address)}
-                      </Link>
-                    </td>
-                    <td>{address.last_seen_slot ?? "N/A"}</td>
-                    <td>{address.verifier_run_count}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <LatestTransactionsFeed initialItems={liveTx.items} />
     </main>
   );
 }
