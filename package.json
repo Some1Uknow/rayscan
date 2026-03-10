@@ -5,6 +5,8 @@
   "description": "General-purpose Solana explorer with Raydium depth",
   "packageManager": "pnpm@10.0.0",
   "scripts": {
+    "dev:all": "bash scripts/dev-all.sh",
+    "dev:stop": "bash scripts/dev-stop.sh",
     "infra:up": "docker compose -f ops/docker-compose.local.yml up -d",
     "infra:down": "docker compose -f ops/docker-compose.local.yml down",
     "db:init:pg": "psql \"$POSTGRES_URL\" -f schemas/postgres/001_init.sql",

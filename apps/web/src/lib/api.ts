@@ -333,10 +333,10 @@ export function getTxDetails(signature: string): Promise<TxDetails> {
   return fetchJson<TxDetails>(`/v1/tx/${signature}`);
 }
 
-export function getAddressDetails(address: string): Promise<AddressDetails> {
-  return fetchJson<AddressDetails>(`/v1/addresses/${address}`);
+export function getAddressDetails(address: string, revalidate = 10): Promise<AddressDetails> {
+  return fetchJson<AddressDetails>(`/v1/addresses/${address}`, { revalidate });
 }
 
-export function getTokenDetails(mint: string): Promise<TokenDetails> {
-  return fetchJson<TokenDetails>(`/v1/tokens/${mint}`);
+export function getTokenDetails(mint: string, revalidate = 20): Promise<TokenDetails> {
+  return fetchJson<TokenDetails>(`/v1/tokens/${mint}`, { revalidate });
 }

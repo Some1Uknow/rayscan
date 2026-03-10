@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getAddressDetails, getTokenDetails, getTopTokens } from "../../../lib/api";
+import { getAddressDetails, getTokenDetails } from "../../../lib/api";
 import { TokenAvatar } from "./token-avatar";
 
 function formatMaybe(value: string | number | null): string {
@@ -81,29 +81,23 @@ export default async function AddressPage({
   params: Promise<{ address: string }>;
 }) {
   const { address } = await params;
-  const [details, topTokens] = await Promise.all([
-    getAddressDetails(address).catch(() => null),
-    getTopTokens(6).catch(() => null)
-  ]);
+  const details = await getAddressDetails(address, 10).catch(() => null);
 
   const runtime = details?.runtime ?? null;
   const addressType = formatAddressType(runtime?.classification ?? "unknown");
   const isTokenMint = runtime?.classification === "token_mint";
   const isTokenAccount = runtime?.classification === "token_account";
-  const tokenDetails = isTokenMint ? await getTokenDetails(address).catch(() => null) : null;
+  const tokenDetails = isTokenMint ? await getTokenDetails(address, 20).catch(() => null) : null;
   const resolvedRuntime = tokenDetails?.runtime ?? runtime;
 
-  const marketToken = topTokens?.items.find((token) => token.mint === address) ?? null;
-  const tokenName = tokenDetails?.identity.name ?? marketToken?.name ?? resolvedRuntime?.knownToken?.name ?? "SPL Token";
-  const tokenSymbol = tokenDetails?.identity.symbol ?? marketToken?.symbol ?? resolvedRuntime?.knownToken?.symbol ?? "TOKEN";
-  const tokenIcon =
-    tokenDetails?.identity.iconUrl ??
-    marketToken?.iconUrl ??
-    resolvedRuntime?.knownToken?.iconUrl ??
-    mintLogoFallback(address);
-  const tokenIconFallback = tokenIcon.includes("raw.githubusercontent.com")
-    ? mintLogoFallback(address)
-    : mintLogoRawFallback(address);
+  const tokenName = tokenDetails?.identity.name ?? resolvedRuntime?.knownToken?.name ?? "SPL Token";
+  const tokenSymbol = tokenDetails?.identity.symbol ?? resolvedRuntime?.knownToken?.symbol ?? "TOKEN";
+  const tokenIconCandidates = [
+    tokenDetails?.identity.iconUrl,
+    resolvedRuntime?.knownToken?.iconUrl,
+    mintLogoFallback(address),
+    mintLogoRawFallback(address)
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
 
   if (isTokenMint) {
     const supplyUi = tokenDetails?.supply.amountUi ?? resolvedRuntime?.tokenMint?.supplyUi ?? null;
@@ -112,9 +106,9 @@ export default async function AddressPage({
     const topHolders = tokenDetails?.holders ?? [];
     const recentTransfers = tokenDetails?.recentTransfers ?? [];
     const largestHolderPct = topHolders[0]?.pctOfSupply ?? null;
-    const priceUsd = tokenDetails?.market.priceUsd ?? marketToken?.priceUsd ?? null;
-    const change24hPct = tokenDetails?.market.change24hPct ?? marketToken?.change24hPct ?? null;
-    const marketCapUsd = tokenDetails?.market.marketCapUsd ?? marketToken?.marketCapUsd ?? null;
+    const priceUsd = tokenDetails?.market.priceUsd ?? null;
+    const change24hPct = tokenDetails?.market.change24hPct ?? null;
+    const marketCapUsd = tokenDetails?.market.marketCapUsd ?? null;
 
     return (
       <main id="main-content" className="container page-main">
@@ -123,8 +117,7 @@ export default async function AddressPage({
             <TokenAvatar
               alt={`${tokenSymbol} icon`}
               fallbackLabel={tokenSymbol.slice(0, 4)}
-              src={tokenIcon}
-              fallbackSrc={tokenIconFallback}
+              sources={tokenIconCandidates}
             />
             <div>
               <p className="eyebrow">Token Mint</p>

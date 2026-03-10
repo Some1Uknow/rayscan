@@ -3,20 +3,22 @@
 import { useEffect, useState } from "react";
 
 type TokenAvatarProps = {
-  src: string | null;
+  sources: string[];
   alt: string;
   fallbackLabel: string;
-  fallbackSrc?: string | null;
 };
 
-export function TokenAvatar({ src, alt, fallbackLabel, fallbackSrc = null }: TokenAvatarProps) {
+export function TokenAvatar({ sources, alt, fallbackLabel }: TokenAvatarProps) {
+  const candidates = sources.filter((value, index, all) => value.trim().length > 0 && all.indexOf(value) === index);
   const [error, setError] = useState(false);
-  const [currentSrc, setCurrentSrc] = useState(src);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
-    setCurrentSrc(src);
+    setCurrentIndex(0);
     setError(false);
-  }, [src]);
+  }, [sources]);
+
+  const currentSrc = candidates[currentIndex] ?? null;
 
   if (error || !currentSrc) {
     return <div className="token-avatar-fallback">{fallbackLabel}</div>;
@@ -27,8 +29,8 @@ export function TokenAvatar({ src, alt, fallbackLabel, fallbackSrc = null }: Tok
       alt={alt}
       className="token-avatar"
       onError={() => {
-        if (fallbackSrc && currentSrc !== fallbackSrc) {
-          setCurrentSrc(fallbackSrc);
+        if (currentIndex < candidates.length - 1) {
+          setCurrentIndex((value) => value + 1);
           return;
         }
         setError(true);

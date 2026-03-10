@@ -334,6 +334,29 @@ type DexScreenerTokenResult = {
   pairs?: DexScreenerPair[] | null;
 };
 
+type RpcDasAssetResult = {
+  content?: {
+    links?: {
+      image?: unknown;
+    } | null;
+    files?: Array<{
+      uri?: unknown;
+      cdn_uri?: unknown;
+      mime?: unknown;
+    }> | null;
+    metadata?: {
+      name?: unknown;
+      symbol?: unknown;
+      image?: unknown;
+    } | null;
+  } | null;
+  metadata?: {
+    name?: unknown;
+    symbol?: unknown;
+    image?: unknown;
+  } | null;
+};
+
 type TopTokenConfig = {
   id: string;
   mint: string;
@@ -449,11 +472,7 @@ async function mapWithConcurrency<T, R>(
   return out;
 }
 
-async function callSolanaRpcWithTimeout<T>(
-  method: string,
-  params: unknown[],
-  timeoutMs: number
-): Promise<T | null> {
+async function callSolanaRpcWithTimeout<T>(method: string, params: unknown, timeoutMs: number): Promise<T | null> {
   const endpoints = rpcCandidates();
   for (const endpoint of endpoints) {
     const result = await callSolanaRpcAtEndpoint<T>(endpoint, method, params, timeoutMs);
@@ -464,10 +483,14 @@ async function callSolanaRpcWithTimeout<T>(
   return null;
 }
 
+async function callPrimarySolanaRpcWithTimeout<T>(method: string, params: unknown, timeoutMs: number): Promise<T | null> {
+  return callSolanaRpcAtEndpoint<T>(env.SOLANA_RPC_URL, method, params, timeoutMs);
+}
+
 async function callSolanaRpcAtEndpoint<T>(
   endpoint: string,
   method: string,
-  params: unknown[],
+  params: unknown,
   timeoutMs: number
 ): Promise<T | null> {
   const controller = new AbortController();
@@ -546,7 +569,7 @@ function writeCache<T>(key: string, value: T, ttlMs: number): T {
   return value;
 }
 
-async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T | null> {
+async function callSolanaRpc<T>(method: string, params: unknown): Promise<T | null> {
   return callSolanaRpcWithTimeout<T>(method, params, 6000);
 }
 
@@ -566,6 +589,31 @@ function maybeNumber(value: unknown): number | null {
     if (Number.isFinite(n)) return n;
   }
   return null;
+}
+
+function firstNonEmptyString(...values: Array<unknown>): string | null {
+  for (const value of values) {
+    const normalized = maybeString(value);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function readAssetImageUrl(asset: RpcDasAssetResult | null): string | null {
+  if (!asset) return null;
+
+  const linkedImage = maybeString(asset.content?.links?.image);
+  if (linkedImage) return linkedImage;
+
+  const fileImage =
+    asset.content?.files?.find((file) => {
+      const mime = maybeString(file?.mime);
+      return mime ? mime.startsWith("image/") : true;
+    }) ?? null;
+  const fileUrl = firstNonEmptyString(fileImage?.cdn_uri, fileImage?.uri);
+  if (fileUrl) return fileUrl;
+
+  return firstNonEmptyString(asset.content?.metadata?.image, asset.metadata?.image);
 }
 
 function decodeU64FromBase64Slice(base64: string): string | null {
@@ -811,15 +859,31 @@ function extractActionLabel(tx: RpcParsedTransactionResult): string {
   return "Unknown";
 }
 
-async function fetchTransactionForAction(signature: string): Promise<RpcParsedTransactionResult | null> {
-  return callSolanaRpc<RpcParsedTransactionResult>("getTransaction", [
+async function fetchTransactionForAction(
+  signature: string,
+  options: {
+    timeoutMs?: number;
+    primaryOnly?: boolean;
+  } = {}
+): Promise<RpcParsedTransactionResult | null> {
+  const params = [
     signature,
     {
       encoding: "jsonParsed",
       maxSupportedTransactionVersion: 0,
       commitment: "confirmed"
     }
-  ]);
+  ];
+
+  if (options.primaryOnly) {
+    return callPrimarySolanaRpcWithTimeout<RpcParsedTransactionResult>(
+      "getTransaction",
+      params,
+      options.timeoutMs ?? 2500
+    );
+  }
+
+  return callSolanaRpcWithTimeout<RpcParsedTransactionResult>("getTransaction", params, options.timeoutMs ?? 6000);
 }
 
 function parseAccountKey(
@@ -1625,26 +1689,31 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
   if (cached) return cached;
   const knownToken = TOP_TOKEN_CONFIG.find((token) => token.mint === params.mint) ?? null;
 
-  const [runtime, supply, largestAccounts, signaturesByMint, dexScreener, coingeckoRow] = await Promise.all([
+  const [runtime, supply, largestAccounts, signaturesByMint, dexScreener, coingeckoRow, asset] = await Promise.all([
     fetchRuntimeAddressSummary(params.mint),
-    callSolanaRpcWithTimeout<RpcTokenSupplyResult>("getTokenSupply", [params.mint, { commitment: "confirmed" }], 9000),
-    callSolanaRpcWithTimeout<RpcTokenLargestAccountsResult>(
+    callPrimarySolanaRpcWithTimeout<RpcTokenSupplyResult>(
+      "getTokenSupply",
+      [params.mint, { commitment: "confirmed" }],
+      2500
+    ),
+    callPrimarySolanaRpcWithTimeout<RpcTokenLargestAccountsResult>(
       "getTokenLargestAccounts",
       [params.mint, { commitment: "confirmed" }],
-      11000
+      2500
     ),
-    callSolanaRpcWithTimeout<RpcSignatureInfo[]>(
+    callPrimarySolanaRpcWithTimeout<RpcSignatureInfo[]>(
       "getSignaturesForAddress",
-      [params.mint, { limit: 16, commitment: "confirmed" }],
-      4500
+      [params.mint, { limit: 6, commitment: "confirmed" }],
+      1800
     ),
-    fetchJsonWithTimeout<DexScreenerTokenResult>(`https://api.dexscreener.com/latest/dex/tokens/${params.mint}`, 3500),
+    fetchJsonWithTimeout<DexScreenerTokenResult>(`https://api.dexscreener.com/latest/dex/tokens/${params.mint}`, 2200),
     knownToken
       ? fetchJsonWithTimeout<CoinGeckoMarketRow[]>(
           `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(knownToken.id)}&order=market_cap_desc&per_page=1&page=1&sparkline=false&price_change_percentage=24h`,
-          3000
+          2200
         )
-      : Promise.resolve(null)
+      : Promise.resolve(null),
+    callPrimarySolanaRpcWithTimeout<RpcDasAssetResult>("getAsset", { id: params.mint }, 1200)
   ]);
 
   if (!runtime.exists && !supply) {
@@ -1689,53 +1758,7 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
         })()
       : null;
 
-  let holderRows = largestAccounts?.value ?? [];
-
-  if (holderRows.length === 0) {
-    const tokenProgramId = runtime.ownerProgram ?? "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
-    const fallbackAccounts = await callSolanaRpcWithTimeout<RpcProgramAccountSlice[]>(
-      "getProgramAccounts",
-      [
-        tokenProgramId,
-        {
-          encoding: "base64",
-          commitment: "confirmed",
-          filters: [
-            { dataSize: 165 },
-            { memcmp: { offset: 0, bytes: params.mint } }
-          ],
-          dataSlice: { offset: 64, length: 8 }
-        }
-      ],
-      16000
-    );
-
-    if (fallbackAccounts && fallbackAccounts.length > 0) {
-      holderRows = fallbackAccounts
-        .map((row) => {
-          const encoded = Array.isArray(row.account.data) ? row.account.data[0] : row.account.data;
-          const amountRaw = decodeU64FromBase64Slice(encoded);
-          if (!amountRaw) return null;
-          const amountUi = uiFromRaw(amountRaw, decimals);
-          const amountUiString = uiStringFromRaw(amountRaw, decimals, 6) ?? amountRaw;
-          return {
-            address: row.pubkey,
-            amount: amountRaw,
-            decimals: decimals ?? 0,
-            uiAmount: amountUi,
-            uiAmountString: amountUiString
-          };
-        })
-        .filter((row): row is NonNullable<typeof row> => row !== null)
-        .sort((a, b) => {
-          const ai = BigInt(a.amount);
-          const bi = BigInt(b.amount);
-          if (ai === bi) return 0;
-          return ai > bi ? -1 : 1;
-        })
-        .slice(0, 20);
-    }
-  }
+  const holderRows = largestAccounts?.value ?? [];
 
   const holders = holderRows.slice(0, 15).map((account, idx) => {
     const amountRaw = account.amount;
@@ -1762,37 +1785,20 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
     };
   });
 
-  const shouldProbeHolderSignatures = (signaturesByMint?.length ?? 0) < 12;
-  const holderSignaturesBatches = shouldProbeHolderSignatures
-    ? await Promise.all(
-        holders.slice(0, 4).map((holder) =>
-          callSolanaRpcWithTimeout<RpcSignatureInfo[]>(
-            "getSignaturesForAddress",
-            [holder.address, { limit: 8, commitment: "confirmed" }],
-            4500
-          )
-        )
-      )
-    : [];
-
   const signatureMap = new Map<string, RpcSignatureInfo>();
   for (const row of signaturesByMint ?? []) {
     signatureMap.set(row.signature, row);
   }
-  for (const batch of holderSignaturesBatches) {
-    for (const row of batch ?? []) {
-      if (!signatureMap.has(row.signature)) {
-        signatureMap.set(row.signature, row);
-      }
-    }
-  }
 
   const signatureCandidates = Array.from(signatureMap.values())
     .sort((a, b) => b.slot - a.slot)
-    .slice(0, 30);
+    .slice(0, 6);
 
-  const txRows = await mapWithConcurrency(signatureCandidates, 6, async (sig) => {
-    const tx = await fetchTransactionForAction(sig.signature);
+  const txRows = await mapWithConcurrency(signatureCandidates, 3, async (sig) => {
+    const tx = await fetchTransactionForAction(sig.signature, {
+      timeoutMs: 1800,
+      primaryOnly: true
+    });
     if (!tx) return [] as Array<{
       signature: string;
       slot: number;
@@ -1828,16 +1834,19 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
     identity: {
       symbol:
         maybeString(identityToken?.symbol) ??
+        firstNonEmptyString(asset?.content?.metadata?.symbol, asset?.metadata?.symbol) ??
         runtime.knownToken?.symbol ??
         knownToken?.symbol ??
         null,
       name:
         maybeString(identityToken?.name) ??
+        firstNonEmptyString(asset?.content?.metadata?.name, asset?.metadata?.name) ??
         runtime.knownToken?.name ??
         knownToken?.name ??
         null,
       iconUrl:
         maybeString(bestDexPair?.info?.imageUrl) ??
+        readAssetImageUrl(asset) ??
         runtime.knownToken?.iconUrl ??
         knownToken?.fallbackIcon ??
         null
@@ -1859,7 +1868,7 @@ app.get("/v1/tokens/:mint", async (request, reply) => {
     recentTransfers
   };
 
-  return writeCache(cacheKey, payload, 30000);
+  return writeCache(cacheKey, payload, 60000);
 });
 
 type LiveTransactionsPayload = {

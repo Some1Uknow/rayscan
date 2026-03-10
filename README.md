@@ -35,6 +35,8 @@ General-purpose Solana explorer blueprint with Raydium-first depth, optimized fo
 5. Initialize schema with `pnpm db:init:pg` and `pnpm db:init:ch`.
 
 ## Dev Commands
+- `pnpm dev:all`
+- `pnpm dev:stop`
 - `pnpm api:dev`
 - `pnpm indexer:dev`
 - `pnpm web:dev`
