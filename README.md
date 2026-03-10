@@ -1,43 +1,73 @@
 # Rayscan
 
-General-purpose Solana explorer blueprint with Raydium-first depth, optimized for:
-- fast reads
-- real-time Raydium decoding
-- low-friction anti-bot controls (no blanket human challenge)
+Rayscan is a search-first Solana explorer built for fast reads, live transaction visibility, and clean detail pages. It is themed for Raydium, but designed as a general-purpose explorer.
+
+## What It Does
+- Search signatures, addresses, token mints, and token accounts
+- Inspect transactions with status, balance changes, accounts, and program logs
+- View token pages with metadata, market data, and logos when available
+- Stream the latest transactions with a live pause/resume feed
+- Surface core network stats such as TPS, supply, fee trends, and top tokens
 
 ## Stack
-- Frontend: Next.js + `@solana/client` + `@solana/react-hooks`
-- Solana SDK: `@solana/kit` (with `@solana/web3-compat` only at boundaries)
-- Ingestion: Helius/Solana WebSocket stream + RPC reconciliation
-- Data: ClickHouse + Postgres + Redis
-- API: REST + GraphQL + SSE
+- Next.js frontend
+- Fastify API
+- Helius / Solana RPC + WebSocket ingestion
+- Postgres for indexed explorer data
+- Docker for local infrastructure
 
-## Monorepo Layout
-- `apps/web`: Raydium-themed explorer UI
-- `services/indexer-stream`: real-time slot/block/account ingestion
-- `services/indexer-backfill`: replay and gap healing
-- `services/api`: query layer for UI/public API
-- `services/verifier`: reproducible program verification worker
-- `services/search-sync`: sync entities into search index
-- `packages/decoders-raydium`: instruction/event decoders
-- `packages/db`: data access models and migrations
-- `packages/shared`: shared types and helpers
-- `schemas/`: starter SQL for Postgres and ClickHouse
-- `ops/`: local infra compose and ops templates
-- `docs/`: architecture and 14-day build plan
-- `docs/verifier-spec.md`: detailed verification pipeline spec
+## Local Development
+1. Copy envs: `cp .env.example .env`
+2. Set at minimum:
+   - `SOLANA_RPC_URL`
+   - `SOLANA_WS_URL`
+   - `POSTGRES_URL`
+3. Install dependencies: `pnpm install`
+4. Start the full app: `pnpm dev:all`
 
-## Quick Start (Blueprint Mode)
-1. Read [docs/repo-blueprint.md](/Users/raghavsharma/Documents/rayscan/docs/repo-blueprint.md).
-2. Read [docs/architecture.md](/Users/raghavsharma/Documents/rayscan/docs/architecture.md).
-3. Install dependencies with `pnpm install`.
-4. Run local infra from [ops/docker-compose.local.yml](/Users/raghavsharma/Documents/rayscan/ops/docker-compose.local.yml).
-5. Initialize schema with `pnpm db:init:pg` and `pnpm db:init:ch`.
+Open `http://127.0.0.1:3000`
 
-## Dev Commands
-- `pnpm dev:all`
-- `pnpm dev:stop`
-- `pnpm api:dev`
-- `pnpm indexer:dev`
-- `pnpm web:dev`
-- `pnpm verifier:dev`
+To stop everything:
+
+```bash
+pnpm dev:stop
+```
+
+Logs are written to:
+- `.run/web.log`
+- `.run/api.log`
+- `.run/indexer.log`
+
+## Services
+- `apps/web` - explorer UI
+- `services/api` - HTTP query layer for the UI
+- `services/indexer-stream` - live Solana ingestion into Postgres
+
+## Production
+Deploy the services separately:
+- `apps/web` -> Vercel
+- `services/api` -> long-running server/container
+- `services/indexer-stream` -> long-running worker/container
+
+This split is intentional. The API serves reads. The indexer keeps a persistent WebSocket connection and continuously writes fresh chain data into Postgres.
+
+## Required Environment Variables
+
+Web:
+- `NEXT_PUBLIC_API_URL`
+- `NEXT_PUBLIC_SITE_URL`
+- `NEXT_PUBLIC_SOLANA_CLUSTER`
+
+API:
+- `POSTGRES_URL`
+- `SOLANA_RPC_URL`
+- `SOLANA_CLUSTER`
+- `API_CORS_ORIGINS`
+
+Indexer:
+- `POSTGRES_URL`
+- `SOLANA_RPC_URL`
+- `SOLANA_WS_URL`
+- `INDEXER_ENABLED`
+
+Additional defaults and optional settings are documented in [.env.example](/Users/raghavsharma/Documents/rayscan/.env.example).
